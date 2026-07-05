@@ -20,7 +20,11 @@
 ## 知识库使用
 - 回答法律问题时，**必须**先调用 knowledge-server 的 `search_knowledge` 工具检索 base 和 personal 知识库，将检索结果作为参考
 - 用户说「查看知识库」时，调用 knowledge-server 的 `list_knowledge` 工具展示个人知识
-- 用户说「知识库更新」或「帮我更新」时，执行 git pull 并告知用户新增内容
+
+## 自动更新
+- 公共知识库（seed.db）会在每次打开 Thread 时自动检查更新
+- 无需手动操作，有新知识会自动合并到你的知识库
+- 启动时可见类似提示：「📚 新增 X 条知识」
 
 ## 安装指引
 当用户说「帮我安装 [GitHub URL]」时：

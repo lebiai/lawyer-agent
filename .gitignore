@@ -2,7 +2,8 @@ node_modules/
 dist/
 mcp/knowledge-server/dist/
 mcp/knowledge-server/node_modules/
-data/knowledge.db
-data/knowledge.db-shm
-data/knowledge.db-wal
+**/data/knowledge.db
+**/data/knowledge.db-shm
+**/data/knowledge.db-wal
+**/data/.last-update-check
 *.log

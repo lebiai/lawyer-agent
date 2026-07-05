@@ -9,17 +9,21 @@ import { VecStore } from './vec-store.js';
 import { BaseStore } from './base-store.js';
 import { PersonalStore } from './personal-store.js';
 import { TOOLS } from './types.js';
-import { existsSync, copyFileSync, mkdirSync } from 'fs';
+import { execSync } from 'child_process';
+import { existsSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, '../data');
+const PROJECT_ROOT = join(__dirname, '../../..');
 
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 
 const DB_PATH = join(DATA_DIR, 'knowledge.db');
 const SEED_PATH = join(DATA_DIR, 'seed.db');
+const UPDATE_CHECK_PATH = join(DATA_DIR, '.last-update-check');
+const UPDATE_INTERVAL_MS = 60 * 60 * 1000; // 1 小时检查一次
 
 /**
  * --build-seed 模式：供应商专用
@@ -32,21 +36,18 @@ if (process.argv.includes('--build-seed')) {
 }
 
 /**
- * --merge-seed 模式：律师 git pull 后运行
- * 将 seed.db 中的新条目合并到 knowledge.db（按 id 去重，不覆盖已有）
+ * --merge-seed 模式：手动合并 seed 到 knowledge
  */
 if (process.argv.includes('--merge-seed')) {
   if (!existsSync(SEED_PATH)) {
-    console.error('❌ seed.db 不存在，请先运行 --merge-seed 或在 setup 时配备 seed.db');
+    console.error('❌ seed.db 不存在');
     process.exit(1);
   }
   const seedStore = new VecStore(SEED_PATH);
   const mainStore = new VecStore(DB_PATH);
-
   const seedItems = seedStore.getAll();
   let added = 0;
   for (const item of seedItems) {
-    // 按 id 去重，已存在则跳过
     const existing = mainStore.getAll().find(i => i.id === item.id);
     if (!existing) {
       await mainStore.add(item);
@@ -59,9 +60,87 @@ if (process.argv.includes('--merge-seed')) {
   process.exit(0);
 }
 
-// ===== 正常启动 =====
+// ===== 自动检查更新（MCP 启动时，每个 Thread 触发一次） =====
 
-// 如果 knowledge.db 不存在，从 seed.db 复制
+function shouldCheckUpdate(): boolean {
+  if (!existsSync(UPDATE_CHECK_PATH)) return true;
+  try {
+    const last = parseInt(readFileSync(UPDATE_CHECK_PATH, 'utf-8').trim());
+    return Date.now() - last > UPDATE_INTERVAL_MS;
+  } catch {
+    return true;
+  }
+}
+
+async function autoUpdateSeed(): Promise<boolean> {
+  if (!shouldCheckUpdate()) return false;
+
+  // 记录本次检查时间
+  writeFileSync(UPDATE_CHECK_PATH, String(Date.now()));
+
+  // 只检查一次，不重试
+  try {
+    execSync('git fetch origin main --quiet', { cwd: PROJECT_ROOT, timeout: 10000, stdio: 'pipe' });
+  } catch {
+    // 无网络 / 非 git 仓库，跳过
+    return false;
+  }
+
+  // 检查是否有更新
+  let behind: string;
+  try {
+    behind = execSync('git rev-list --count HEAD..origin/main', {
+      cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 5000, stdio: 'pipe',
+    }).trim();
+  } catch {
+    return false;
+  }
+
+  if (behind === '0') {
+    console.error('[update] 知识库已是最新');
+    return false;
+  }
+
+  console.error(`[update] 发现公共知识库更新 (${behind} 个提交)，正在同步...`);
+
+  // 只拉取 seed.db，不碰代码
+  try {
+    execSync('git fetch origin main --quiet --depth=1', {
+      cwd: PROJECT_ROOT, timeout: 15000, stdio: 'pipe',
+    });
+    execSync('git checkout origin/main -- mcp/knowledge-server/data/seed.db', {
+      cwd: PROJECT_ROOT, timeout: 5000, stdio: 'pipe',
+    });
+  } catch (e) {
+    console.error(`[update] 拉取 seed.db 失败: ${e}`);
+    return false;
+  }
+
+  console.error('[update] seed.db 已更新，合并到知识库...');
+
+  // 合并到 knowledge.db
+  if (existsSync(DB_PATH)) {
+    const seedStore = new VecStore(SEED_PATH);
+    const mainStore = new VecStore(DB_PATH);
+    const seedItems = seedStore.getAll();
+    let added = 0;
+    for (const item of seedItems) {
+      const existing = mainStore.getAll().find(i => i.id === item.id);
+      if (!existing) {
+        await mainStore.add(item);
+        added++;
+      }
+    }
+    seedStore.close();
+    mainStore.close();
+    console.error(`[update] ✅ 新增 ${added} 条知识`);
+  }
+
+  return true;
+}
+
+// ===== 知识库初始化 =====
+
 if (!existsSync(DB_PATH)) {
   if (existsSync(SEED_PATH)) {
     copyFileSync(SEED_PATH, DB_PATH);
@@ -71,10 +150,9 @@ if (!existsSync(DB_PATH)) {
   }
 }
 
-// 共享 VecStore 实例
 const store = new VecStore(DB_PATH);
 
-// 兼容旧版 --init（现在等价于 --merge-seed）
+// 兼容旧版 --init
 if (process.argv.includes('--init')) {
   if (existsSync(SEED_PATH)) {
     const seedStore = new VecStore(SEED_PATH);
@@ -95,7 +173,11 @@ if (process.argv.includes('--init')) {
   process.exit(0);
 }
 
-// base-store 直接读 seed.db（只读）
+// ===== 自动检查更新（在 Server 启动前执行）=====
+await autoUpdateSeed();
+
+// ===== MCP Server =====
+
 const baseStore = new BaseStore(SEED_PATH);
 const personalStore = new PersonalStore(store);
 
