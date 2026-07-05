@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash hooks/extract-knowledge.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+node_modules/
+dist/
+mcp/knowledge-server/dist/
+mcp/knowledge-server/node_modules/
+data/
+*.log
