@@ -3,20 +3,26 @@ set -euo pipefail
 
 echo "🔧 正在安装律师助手..."
 
-# 检查依赖
 if ! command -v node &> /dev/null; then
     echo "❌ 请先安装 Node.js (>=18)"
     exit 1
 fi
 
-# 安装 MCP Server 依赖
 cd "$(dirname "$0")/mcp/knowledge-server"
+
+# 安装依赖
 npm install
 npm run build
 
-# 初始化知识库
-echo "📚 正在导入基础法律知识..."
-node dist/server.js --init
+# 确保 data 目录存在
+mkdir -p data
+
+# 如果 seed.db 存在且 knowledge.db 不存在，拷贝初始数据
+if [ -f "data/seed.db" ] && [ ! -f "data/knowledge.db" ]; then
+    echo "📚 初始化知识库..."
+    cp data/seed.db data/knowledge.db
+    echo "✅ 知识库初始化完成"
+fi
 
 echo "✅ 律师助手安装完成！"
 echo ""
