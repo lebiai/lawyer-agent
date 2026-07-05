@@ -1,4 +1,4 @@
 [mcp_servers.knowledge-server]
 command = "node"
 args = ["mcp/knowledge-server/dist/server.js"]
-startup_timeout_sec = 30
+startup_timeout_sec = 120

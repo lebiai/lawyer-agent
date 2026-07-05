@@ -30,16 +30,19 @@ fi
 npm run build
 
 # 2. 注册 MCP Server 到项目本地配置
-#    使用项目内 .codex/config.toml，注意：服务器路径写绝对路径
 LOCAL_CONFIG="$PROJECT_DIR/.codex/config.toml"
 mkdir -p "$(dirname "$LOCAL_CONFIG")"
-cat > "$LOCAL_CONFIG" << EOF
+if [ ! -f "$LOCAL_CONFIG" ]; then
+    cat > "$LOCAL_CONFIG" << EOF
 [mcp_servers.knowledge-server]
 command = "node"
-args = ["$PROJECT_DIR/mcp/knowledge-server/dist/server.js"]
+args = ["mcp/knowledge-server/dist/server.js"]
 startup_timeout_sec = 30
 EOF
-echo "✅ MCP Server 已注册到项目配置"
+    echo "✅ MCP Server 已注册到项目配置"
+else
+    echo "⏭️  .codex/config.toml 已存在，跳过覆盖"
+fi
 
 # 3. 清理全局配置中可能存在的错误条目（旧版安装遗留）
 GLOBAL_CONFIG="$HOME/.codex/config.toml"
@@ -55,6 +58,22 @@ if [ -f "$GLOBAL_CONFIG" ]; then
 fi
 
 echo ""
+# 预下载嵌入模型（避免首次 MCP 启动时超时）
+echo "☁️  预下载嵌入模型（首次约 100MB）..."
+cd "$PROJECT_DIR/mcp/knowledge-server"
+node -e "
+const { pipeline } = require('@xenova/transformers');
+(async () => {
+  try {
+    await pipeline('feature-extraction', 'Xenova/bge-base-zh-v1.5', { quantized: true });
+    console.error('✅ 嵌入模型下载完成');
+  } catch(e) {
+    console.error('⚠️  模型下载失败，首次使用可能需要等待:', e.message);
+  }
+})();
+" 2>&1 | tail -5 || echo "⚠️  模型缓存失败，首次启动时自动下载"
+cd "$PROJECT_DIR"
+
 echo "🎉 律师助手安装完成！"
 echo ""
 echo "下一步："
