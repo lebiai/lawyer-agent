@@ -5,6 +5,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { z } from 'zod';
 import { VecStore } from './vec-store.js';
 import { BaseStore } from './base-store.js';
 import { PersonalStore } from './personal-store.js';
@@ -26,6 +27,39 @@ const DB_PATH = join(DATA_DIR, 'knowledge.db');
 const SEED_PATH = join(DATA_DIR, 'seed.db');
 const UPDATE_CHECK_PATH = join(DATA_DIR, '.last-update-check');
 const UPDATE_INTERVAL_MS = 60 * 60 * 1000;
+
+// ===== 工具参数 Schema =====
+
+const SearchSchema = z.object({
+  query: z.string().min(1, 'query 不能为空'),
+  type: z.string().optional(),
+  limit: z.number().int().positive().max(50).optional().default(10),
+});
+
+const StoreSchema = z.object({
+  title: z.string().min(1, 'title 不能为空'),
+  content: z.string().min(1, 'content 不能为空'),
+  type: z.string().optional().default('personal_note'),
+  tags: z.array(z.string()).optional().default([]),
+  reference: z.string().optional(),
+  metadata: z.any().optional(),
+});
+
+const ListSchema = z.object({
+  type: z.string().optional(),
+});
+
+const DeleteSchema = z.object({
+  id: z.string().min(1, 'id 不能为空'),
+});
+
+const LogConversationSchema = z.object({
+  caseType: z.string().min(1, 'caseType 不能为空'),
+  question: z.string().min(1, 'question 不能为空'),
+  topics: z.array(z.string()).optional().default([]),
+  laws: z.array(z.string()).optional().default([]),
+  stored: z.boolean().optional().default(false),
+});
 
 // ===== 自动检查 seed.db 更新 =====
 
@@ -79,14 +113,11 @@ async function autoUpdateSeed(): Promise<boolean> {
     return false;
   }
 
-  // seed.db 直接替换，BaseStore 下次搜索自动读新数据
   console.error('[update] ✅ seed.db 已更新');
   return true;
 }
 
 // ===== 知识库初始化 =====
-
-// knowledge.db 只存个人数据，首次启动时 VecStore 自动创建空库
 
 // VecStore 实例（knowledge.db 专用，存个人数据）
 const store = new VecStore(DB_PATH);
@@ -105,8 +136,8 @@ try {
   console.error('[启动] 嵌入模型预热完成');
 } catch (e) {
   console.error('[启动] 嵌入模型预热失败: ' + e);
+  console.error('[启动] 将降级运行：向量搜索和存储功能不可用');
 }
-
 
 // ===== MCP Server =====
 
@@ -132,38 +163,46 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: '搜索关键词或问题' },
-          type: { type: 'string', description: '筛选类型（可选）' },
-          limit: { type: 'number', description: '返回条数上限', default: 10 },
+          query: { type: 'string', description: '搜索查询' },
+          type: { type: 'string', description: '知识类型: law/case/term/template/case_analysis/personal_note' },
+          limit: { type: 'number', description: '返回结果数，默认10，最大50' },
         },
         required: ['query'],
       },
     },
     {
       name: TOOLS.STORE,
-      description: '将结构化知识存入个人知识库，自动生成向量嵌入',
+      description: '存入一条提炼后的法律知识点到个人知识库',
       inputSchema: {
         type: 'object',
         properties: {
-          title: { type: 'string', description: '知识标题' },
-          content: { type: 'string', description: '知识内容' },
-          type: { type: 'string', description: '知识类型', default: 'personal_note' },
+          title: { type: 'string', description: '知识点标题' },
+          content: { type: 'string', description: '知识点内容（含用户问题和法律分析）' },
+          type: { type: 'string', description: '知识类型: law/case/term/case_analysis/personal_note，默认personal_note' },
           tags: { type: 'array', items: { type: 'string' }, description: '标签列表' },
-          reference: { type: 'string', description: '法条号/案号（如有）' },
-          metadata: { type: 'object', description: '扩展元数据' },
+          reference: { type: 'string', description: '法条/案号等引用来源' },
         },
         required: ['title', 'content'],
       },
     },
     {
       name: TOOLS.LIST,
-      description: '查看个人知识库摘要',
-      inputSchema: { type: 'object', properties: { type: { type: 'string' } } },
+      description: '列出个人知识库中的所有知识点摘要',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', description: '按类型筛选: law/case/term/template/case_analysis/personal_note' },
+        },
+      },
     },
     {
       name: TOOLS.DELETE,
-      description: '删除个人知识库中的条目',
-      inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+      description: '删除个人知识库中的一条知识点',
+      inputSchema: {
+        type: 'object',
+        properties: { id: { type: 'string', description: '知识条目ID' } },
+        required: ['id'],
+      },
     },
     {
       name: TOOLS.LOG_CONVERSATION,
@@ -185,128 +224,176 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       description: '获取用户执业画像：案由分布、高频法条、关注话题等，用于在回答中个性化引用',
       inputSchema: { type: 'object', properties: {} },
     },
+    {
+      name: TOOLS.EXPORT,
+      description: '导出个人知识库全部内容为 JSON 格式',
+      inputSchema: { type: 'object', properties: {} },
+    },
   ],
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
+  const { name, arguments: rawArgs } = request.params;
+  const args = rawArgs ?? {};
 
-  switch (name) {
-    case TOOLS.SEARCH: {
-      const { query, type, limit } = args as any;
-      const startTime = Date.now();
-      const [baseResults, personalResults] = await Promise.all([
-        baseStore.search(query, type, limit ?? 10),
-        personalStore.search(query, type, limit ?? 10),
-      ]);
-      const all = [...baseResults, ...personalResults]
-        .sort((a, b) => b.score - a.score)
-        .slice(0, limit ?? 10);
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            results: all,
-            totalBase: baseStore.count(),
-            totalPersonal: personalStore.count(),
-            timeMs: Date.now() - startTime,
-          }, null, 2),
-        }],
-      };
-    }
-
-    case TOOLS.STORE: {
-      const { title, content, type, tags, reference, metadata } = args as any;
-      const id = `personal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      const now = new Date().toISOString();
-
-      const existing = await personalStore.findSimilar(title, content, type || 'personal_note', 0.9);
-      if (existing) {
-        personalStore.incrementUsage(existing.item.id);
+  try {
+    switch (name) {
+      case TOOLS.SEARCH: {
+        const { query, type, limit } = SearchSchema.parse(args);
+        const startTime = Date.now();
+        const [baseResults, personalResults] = await Promise.all([
+          baseStore.search(query, type, limit),
+          personalStore.search(query, type, limit),
+        ]);
+        const all = [...baseResults, ...personalResults]
+          .sort((a, b) => b.score - a.score)
+          .slice(0, limit);
         return {
           content: [{
             type: 'text',
             text: JSON.stringify({
-              saved: false,
-              matched: existing.item.id,
-              message: '已有相似条目，已增加引用计数',
-            }),
+              results: all,
+              totalBase: baseStore.count(),
+              totalPersonal: personalStore.count(),
+              timeMs: Date.now() - startTime,
+            }, null, 2),
           }],
         };
       }
 
-      await personalStore.add({
-        id,
-        type: type || 'personal_note',
-        title,
-        content,
-        tags: tags || [],
-        reference: reference || undefined,
-        source: 'extract',
-        createdAt: now,
-        updatedAt: now,
-        usageCount: 1,
-        metadata: JSON.stringify(metadata || {}),
-      } as any);
+      case TOOLS.STORE: {
+        const { title, content, type, tags, reference } = StoreSchema.parse(args);
+        const id = `personal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const now = new Date().toISOString();
 
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({ saved: true, id, title, message: '已存入个人知识库' }),
-        }],
-      };
+        const existing = await personalStore.findSimilar(title, content, type, 0.9);
+        if (existing) {
+          personalStore.incrementUsage(existing.item.id);
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                saved: false,
+                matched: existing.item.id,
+                message: '已有相似条目，已增加引用计数',
+              }),
+            }],
+          };
+        }
+
+        await personalStore.add({
+          id,
+          type: type as any,
+          title,
+          content,
+          tags,
+          reference: reference || undefined,
+          source: 'extract',
+          createdAt: now,
+          updatedAt: now,
+          usageCount: 1,
+          metadata: '{}',
+        });
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ saved: true, id, title, message: '已存入个人知识库' }),
+          }],
+        };
+      }
+
+      case TOOLS.LIST: {
+        const { type } = ListSchema.parse(args);
+        const items = personalStore.getAll(type as any);
+        const byType = personalStore.vecStore.countByType();
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              total: items.length,
+              byType,
+              items: items.slice(0, 50).map(i => ({
+                id: i.id,
+                title: i.title,
+                type: i.type,
+                tags: typeof i.tags === 'string' ? JSON.parse(i.tags) : (i.tags || []),
+                usageCount: i.usageCount,
+                createdAt: i.createdAt,
+              })),
+            }, null, 2),
+          }],
+        };
+      }
+
+      case TOOLS.DELETE: {
+        const { id } = DeleteSchema.parse(args);
+        return { content: [{ type: 'text', text: JSON.stringify({ deleted: personalStore.delete(id) }) }] };
+      }
+
+      case TOOLS.LOG_CONVERSATION: {
+        const { caseType, question, topics, laws, stored } = LogConversationSchema.parse(args);
+        const logId = `conv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        await profileStore.log({
+          id: logId,
+          date: new Date().toISOString(),
+          caseType,
+          question,
+          topics,
+          laws,
+          stored,
+        });
+        return { content: [{ type: 'text', text: JSON.stringify({ saved: true, id: logId }) }] };
+      }
+
+      case TOOLS.GET_PROFILE: {
+        const profile = profileStore.getProfile();
+        return { content: [{ type: 'text', text: JSON.stringify(profile, null, 2) }] };
+      }
+
+      case TOOLS.EXPORT: {
+        const allItems = personalStore.getAll();
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              exportedAt: new Date().toISOString(),
+              total: allItems.length,
+              items: allItems.map(i => ({
+                id: i.id,
+                type: i.type,
+                title: i.title,
+                content: i.content,
+                tags: typeof i.tags === 'string' ? JSON.parse(i.tags) : (i.tags || []),
+                reference: i.reference,
+                source: i.source,
+                createdAt: i.createdAt,
+                updatedAt: i.updatedAt,
+                usageCount: i.usageCount,
+              })),
+            }, null, 2),
+          }],
+        };
+      }
+
+      default:
+        throw new Error(`未知工具: ${name}`);
     }
-
-    case TOOLS.LIST: {
-      const { type } = (args ?? {}) as { type?: string };
-      const items = personalStore.getAll(type as any);
-      const byType = personalStore.vecStore.countByType();
+  } catch (err) {
+    // 区分验证错误和运行时错误
+    if (err instanceof z.ZodError) {
       return {
         content: [{
           type: 'text',
           text: JSON.stringify({
-            total: items.length,
-            byType,
-            items: items.slice(0, 50).map(i => ({
-              id: i.id,
-              title: i.title,
-              type: i.type,
-              tags: typeof i.tags === 'string' ? JSON.parse(i.tags) : (i.tags || []),
-              usageCount: i.usageCount,
-              createdAt: i.createdAt,
-            })),
-          }, null, 2),
+            error: '参数验证失败',
+            details: err.issues.map((e: any) => `${e.path.join('.')}: ${e.message}`),
+          }),
         }],
+        isError: true,
       };
     }
-
-    case TOOLS.DELETE: {
-      const { id } = args as { id: string };
-      return { content: [{ type: 'text', text: JSON.stringify({ deleted: personalStore.delete(id) }) }] };
-    }
-
-    case TOOLS.LOG_CONVERSATION: {
-      const { caseType, question, topics, laws, stored } = args as any;
-      const logId = `conv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      await profileStore.log({
-        id: logId,
-        date: new Date().toISOString(),
-        caseType,
-        question,
-        topics: topics || [],
-        laws: laws || [],
-        stored: !!stored,
-      });
-      return { content: [{ type: 'text', text: JSON.stringify({ saved: true, id: logId }) }] };
-    }
-
-    case TOOLS.GET_PROFILE: {
-      const profile = profileStore.getProfile();
-      return { content: [{ type: 'text', text: JSON.stringify(profile, null, 2) }] };
-    }
-
-    default:
-      throw new Error(`Unknown tool: ${name}`);
+    throw err;
   }
 });
 

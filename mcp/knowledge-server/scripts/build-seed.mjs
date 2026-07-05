@@ -67,7 +67,7 @@ async function main() {
       usage_count INTEGER DEFAULT 0, metadata TEXT DEFAULT '{}'
     );
     CREATE VIRTUAL TABLE knowledge_vectors USING vec0(
-      id TEXT PRIMARY KEY, embedding FLOAT[1024]
+      id TEXT PRIMARY KEY, embedding FLOAT[${dim}]
     );
   `);
 
@@ -83,8 +83,8 @@ async function main() {
         JSON.stringify(item.tags),item.reference||null,
         item.source,item.createdAt,item.updatedAt,
         item.usageCount,item.metadata||'{}');
-      const p = new Float32Array(1024);
-      p.set(embeddings[i].slice(0, 1024));
+      const p = new Float32Array(dim);
+      p.set(embeddings[i].slice(0, dim));
       insVec.run(item.id, p);
     }
   });

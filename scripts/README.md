@@ -1,20 +1,17 @@
-# 工具脚本
+# 知识图谱可视化生成器
 
-## 知识图谱可视化
+## scripts/generate-viz.mjs (推荐)
 
-```bash
-# 生成知识图谱页面
-python3 scripts/generate-viz.py
-
-# 如果只想看公共知识库或只想看个人知识库：
-python3 scripts/generate-viz.py --no-kb    # 只看 seed.db
-python3 scripts/generate-viz.py --no-seed  # 只看 knowledge.db
-```
-
-生成后双击 `kb-viz.html` 即可在浏览器中查看。
-
-## 编译种子数据（供应商专用）
+Node.js 脚本，消除 Python 依赖。从 SQLite 数据库读取知识数据，生成 `kb-viz.html`。
 
 ```bash
-node mcp/knowledge-server/scripts/build-seed.mjs
+# 只显示个人知识库（默认）
+NODE_PATH=mcp/knowledge-server/node_modules node scripts/generate-viz.mjs
+
+# 同时显示公共知识库
+NODE_PATH=mcp/knowledge-server/node_modules node scripts/generate-viz.mjs --with-seed
 ```
+
+## scripts/generate-viz.py (已废弃)
+
+旧版 Python 脚本，保留供参考。已由 `generate-viz.mjs` 替代。

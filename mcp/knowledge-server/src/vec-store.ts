@@ -3,7 +3,8 @@ import * as sqliteVec from 'sqlite-vec';
 import { KnowledgeItem, SearchResult } from './types.js';
 import { getEmbeddingService } from './embed.js';
 
-const MAX_DIMENSION = 1024;
+/** 默认向量维度（bge-base-zh-v1.5 实际输出 768 维） */
+const DEFAULT_DIMENSION = 768;
 
 interface CacheEntry {
   results: SearchResult[];
@@ -46,7 +47,6 @@ export interface SearchOptions {
   type?: string;
   source?: string;
   limit?: number;
-  /** 索引策略预留: flat | hnsw | ivf */
   indexType?: 'flat';
 }
 
@@ -73,9 +73,21 @@ function rowToItem(row: any): KnowledgeItem {
   };
 }
 
-function padVector(vec: number[]): Float32Array {
-  const padded = new Float32Array(MAX_DIMENSION);
-  padded.set(vec.slice(0, MAX_DIMENSION));
+/** 获取实际向量维度，优先取模型维度，回退到默认值 */
+function getActualDimension(): number {
+  try {
+    const svc = getEmbeddingService();
+    // 如果模型已初始化，用实际维度；否则用默认
+    return svc.dimension || DEFAULT_DIMENSION;
+  } catch {
+    return DEFAULT_DIMENSION;
+  }
+}
+
+function padVector(vec: number[], dim?: number): Float32Array {
+  const targetDim = dim || getActualDimension();
+  const padded = new Float32Array(targetDim);
+  padded.set(vec.slice(0, targetDim));
   return padded;
 }
 
@@ -91,33 +103,103 @@ export class VecStore {
     this.initTables();
   }
 
+  private getStoredDimension(): number {
+    const existing = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_meta'"
+    ).get();
+    if (!existing) return 0;
+
+    const row = this.db.prepare(
+      "SELECT value FROM _schema_meta WHERE key = 'vector_dimension'"
+    ).get() as any;
+    return row ? parseInt(row.value, 10) : 0;
+  }
+
   private initTables() {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS knowledge (
-        id          TEXT PRIMARY KEY,
-        type        TEXT NOT NULL,
-        title       TEXT NOT NULL,
-        content     TEXT NOT NULL,
-        tags        TEXT NOT NULL DEFAULT '[]',
-        reference   TEXT,
-        source      TEXT DEFAULT 'manual',
-        created_at  TEXT NOT NULL,
-        updated_at  TEXT NOT NULL,
-        usage_count INTEGER DEFAULT 0,
-        metadata    TEXT DEFAULT '{}'
-      );
+    const modelDim = getActualDimension();
+    const storedDim = this.getStoredDimension();
 
-      CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_vectors USING vec0(
-        id        TEXT PRIMARY KEY,
-        embedding FLOAT[${MAX_DIMENSION}]
-      );
+    // 如果表已存在且维度不匹配，迁移
+    if (storedDim > 0 && storedDim !== modelDim) {
+      console.error(`[迁移] 向量维度 ${storedDim} → ${modelDim}，重建向量表...`);
+      this.db.exec('DROP TABLE IF EXISTS knowledge_vectors');
+      this.db.exec("DROP TABLE IF EXISTS _schema_meta");
+    }
 
-      CREATE TABLE IF NOT EXISTS tag_index (
-        tag    TEXT NOT NULL,
-        kb_id  TEXT NOT NULL,
-        PRIMARY KEY (tag, kb_id)
-      );
-    `);
+    // 如果表存在且维度匹配，只初始化常规表
+    const vecTableExists = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='knowledge_vectors'"
+    ).get();
+
+    if (!vecTableExists) {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS knowledge (
+          id          TEXT PRIMARY KEY,
+          type        TEXT NOT NULL,
+          title       TEXT NOT NULL,
+          content     TEXT NOT NULL,
+          tags        TEXT NOT NULL DEFAULT '[]',
+          reference   TEXT,
+          source      TEXT DEFAULT 'manual',
+          created_at  TEXT NOT NULL,
+          updated_at  TEXT NOT NULL,
+          usage_count INTEGER DEFAULT 0,
+          metadata    TEXT DEFAULT '{}'
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_vectors USING vec0(
+          id        TEXT PRIMARY KEY,
+          embedding FLOAT[${modelDim}]
+        );
+
+        CREATE TABLE IF NOT EXISTS tag_index (
+          tag    TEXT NOT NULL,
+          kb_id  TEXT NOT NULL,
+          PRIMARY KEY (tag, kb_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS _schema_meta (
+          key   TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+
+        INSERT OR REPLACE INTO _schema_meta (key, value) VALUES ('vector_dimension', '${modelDim}');
+        INSERT OR REPLACE INTO _schema_meta (key, value) VALUES ('schema_version', '2');
+      `);
+    } else {
+      // 仅确保常规表和元数据表存在
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS knowledge (
+          id          TEXT PRIMARY KEY,
+          type        TEXT NOT NULL,
+          title       TEXT NOT NULL,
+          content     TEXT NOT NULL,
+          tags        TEXT NOT NULL DEFAULT '[]',
+          reference   TEXT,
+          source      TEXT DEFAULT 'manual',
+          created_at  TEXT NOT NULL,
+          updated_at  TEXT NOT NULL,
+          usage_count INTEGER DEFAULT 0,
+          metadata    TEXT DEFAULT '{}'
+        );
+
+        CREATE TABLE IF NOT EXISTS tag_index (
+          tag    TEXT NOT NULL,
+          kb_id  TEXT NOT NULL,
+          PRIMARY KEY (tag, kb_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS _schema_meta (
+          key   TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+      `);
+
+      // 确保维度元数据写入
+      this.db.prepare(
+        "INSERT OR REPLACE INTO _schema_meta (key, value) VALUES ('vector_dimension', ?)"
+      ).run(String(modelDim));
+    }
   }
 
   close() { this.db.close(); }
@@ -170,16 +252,14 @@ export class VecStore {
   async search(options: SearchOptions): Promise<SearchResult[]> {
     const { query, type, source, limit = 10 } = options;
 
-    // 查询缓存
     const cached = this.queryCache.get(query, type, source);
     if (cached) return cached;
 
-    // 生成查询向量
     const svc = getEmbeddingService();
     const queryVec = await svc.embed(query);
 
-    // 构建 SQL
     const conditions: string[] = ['1=1'];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const params: any[] = [padVector(queryVec)];
     if (type) { conditions.push('k.type = ?'); params.push(type); }
     if (source) { conditions.push('k.source = ?'); params.push(source); }

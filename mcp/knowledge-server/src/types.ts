@@ -40,10 +40,10 @@ export interface UserProfile {
 
 export const TOOLS = {
   SEARCH: 'search_knowledge',
-  EXTRACT: 'extract_knowledge',
   STORE: 'store_knowledge',
   LIST: 'list_knowledge',
   DELETE: 'delete_knowledge',
   LOG_CONVERSATION: 'log_conversation',
   GET_PROFILE: 'get_user_profile',
+  EXPORT: 'export_knowledge',
 } as const;
