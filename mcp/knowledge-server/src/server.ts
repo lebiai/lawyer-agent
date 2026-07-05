@@ -10,7 +10,7 @@ import { BaseStore } from './base-store.js';
 import { PersonalStore } from './personal-store.js';
 import { TOOLS } from './types.js';
 import { execSync } from 'child_process';
-import { existsSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -23,44 +23,9 @@ if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 const DB_PATH = join(DATA_DIR, 'knowledge.db');
 const SEED_PATH = join(DATA_DIR, 'seed.db');
 const UPDATE_CHECK_PATH = join(DATA_DIR, '.last-update-check');
-const UPDATE_INTERVAL_MS = 60 * 60 * 1000; // 1 小时检查一次
+const UPDATE_INTERVAL_MS = 60 * 60 * 1000;
 
-/**
- * --build-seed 模式：供应商专用
- * 将 seed/ 目录下的 JSON 编译为 seed.db
- * 使用 scripts/build-seed.mjs 替代
- */
-if (process.argv.includes('--build-seed')) {
-  console.error('请使用 node scripts/build-seed.mjs 来编译 seed 数据');
-  process.exit(1);
-}
-
-/**
- * --merge-seed 模式：手动合并 seed 到 knowledge
- */
-if (process.argv.includes('--merge-seed')) {
-  if (!existsSync(SEED_PATH)) {
-    console.error('❌ seed.db 不存在');
-    process.exit(1);
-  }
-  const seedStore = new VecStore(SEED_PATH);
-  const mainStore = new VecStore(DB_PATH);
-  const seedItems = seedStore.getAll();
-  let added = 0;
-  for (const item of seedItems) {
-    const existing = mainStore.getAll().find(i => i.id === item.id);
-    if (!existing) {
-      await mainStore.add(item);
-      added++;
-    }
-  }
-  seedStore.close();
-  mainStore.close();
-  console.log(`✅ seed 数据合并完成，新增 ${added} 条`);
-  process.exit(0);
-}
-
-// ===== 自动检查更新（MCP 启动时，每个 Thread 触发一次） =====
+// ===== 自动检查 seed.db 更新 =====
 
 function shouldCheckUpdate(): boolean {
   if (!existsSync(UPDATE_CHECK_PATH)) return true;
@@ -74,7 +39,6 @@ function shouldCheckUpdate(): boolean {
 
 async function autoUpdateSeed(): Promise<boolean> {
   if (!shouldCheckUpdate()) return false;
-
   writeFileSync(UPDATE_CHECK_PATH, String(Date.now()));
 
   try {
@@ -83,17 +47,16 @@ async function autoUpdateSeed(): Promise<boolean> {
     return false;
   }
 
-  // 只比对 seed.db 这个文件的 git blob hash
   let remoteSha: string, localSha: string;
   try {
     remoteSha = execSync(
       'git ls-tree origin/main -- mcp/knowledge-server/data/seed.db',
-      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 5000, stdio: 'pipe' }
-    ).trim().split(/s+/)[2] || '';
+      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 5000, stdio: 'pipe' },
+    ).trim().split(/\s+/)[2] || '';
     localSha = execSync(
       'git ls-tree HEAD -- mcp/knowledge-server/data/seed.db',
-      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 5000, stdio: 'pipe' }
-    ).trim().split(/s+/)[2] || '';
+      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 5000, stdio: 'pipe' },
+    ).trim().split(/\s+/)[2] || '';
   } catch {
     return false;
   }
@@ -104,12 +67,8 @@ async function autoUpdateSeed(): Promise<boolean> {
   }
 
   console.error('[update] 发现 seed.db 更新，正在同步...');
-
-  // 只拉取 seed.db，不碰代码
   try {
-    execSync('git fetch origin main --quiet --depth=1', {
-      cwd: PROJECT_ROOT, timeout: 15000, stdio: 'pipe',
-    });
+    execSync('git fetch origin main --quiet --depth=1', { cwd: PROJECT_ROOT, timeout: 15000, stdio: 'pipe' });
     execSync('git checkout origin/main -- mcp/knowledge-server/data/seed.db', {
       cwd: PROJECT_ROOT, timeout: 5000, stdio: 'pipe',
     });
@@ -118,74 +77,30 @@ async function autoUpdateSeed(): Promise<boolean> {
     return false;
   }
 
-  console.error('[update] seed.db 已更新，合并到知识库...');
-
-  if (existsSync(DB_PATH)) {
-    const seedStore = new VecStore(SEED_PATH);
-    const mainStore = new VecStore(DB_PATH);
-    const seedItems = seedStore.getAll();
-    let added = 0;
-    for (const item of seedItems) {
-      const existing = mainStore.getAll().find(i => i.id === item.id);
-      if (!existing) {
-        await mainStore.add(item);
-        added++;
-      }
-    }
-    seedStore.close();
-    mainStore.close();
-    console.error('[update] ✅ 新增 ' + added + ' 条知识');
-  }
-
+  // seed.db 直接替换，BaseStore 下次搜索自动读新数据
+  console.error('[update] ✅ seed.db 已更新');
   return true;
 }
 
 // ===== 知识库初始化 =====
-// ===== 知识库初始化 =====
 
-if (!existsSync(DB_PATH)) {
-  if (existsSync(SEED_PATH)) {
-    copyFileSync(SEED_PATH, DB_PATH);
-    console.error('[init] 从 seed.db 初始化 knowledge.db');
-  } else {
-    console.error('[init] 创建空的 knowledge.db');
-  }
-}
+// knowledge.db 只存个人数据，首次启动时 VecStore 自动创建空库
 
+// VecStore 实例（knowledge.db 专用，存个人数据）
 const store = new VecStore(DB_PATH);
 
-// 兼容旧版 --init
-if (process.argv.includes('--init')) {
-  if (existsSync(SEED_PATH)) {
-    const seedStore = new VecStore(SEED_PATH);
-    const seedItems = seedStore.getAll();
-    let added = 0;
-    for (const item of seedItems) {
-      const existing = store.getAll().find(i => i.id === item.id);
-      if (!existing) {
-        await store.add(item);
-        added++;
-      }
-    }
-    seedStore.close();
-    console.log(`✅ seed 数据合并完成，新增 ${added} 条`);
-  }
-  console.log(`✅ Base 库: ${store.count(undefined, 'seed')} 条`);
-  console.log(`✅ Personal 库: ${store.count(undefined, 'extract')} 条`);
-  process.exit(0);
-}
+// BaseStore 直接读 seed.db（只读）
+const baseStore = new BaseStore(SEED_PATH);
+const personalStore = new PersonalStore(store);
 
-// ===== 自动检查更新（在 Server 启动前执行）=====
+// ===== 启动时自动检查更新（在 Server 启动前执行） =====
 await autoUpdateSeed();
 
 // ===== MCP Server =====
 
-const baseStore = new BaseStore(SEED_PATH);
-const personalStore = new PersonalStore(store);
-
 const server = new Server(
   { name: 'lawyer-knowledge-server', version: '2.0.0' },
-  { capabilities: { tools: {} } }
+  { capabilities: { tools: {} } },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -270,19 +185,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify({ saved: false, matched: existing.item.id, message: '已有相似条目，已增加引用计数' }),
+            text: JSON.stringify({
+              saved: false,
+              matched: existing.item.id,
+              message: '已有相似条目，已增加引用计数',
+            }),
           }],
         };
       }
 
       await personalStore.add({
-        id, type: type || 'personal_note', title, content,
-        tags: tags || [], reference: reference || undefined,
-        source: 'extract', createdAt: now, updatedAt: now,
-        usageCount: 1, metadata: JSON.stringify(metadata || {}),
+        id,
+        type: type || 'personal_note',
+        title,
+        content,
+        tags: tags || [],
+        reference: reference || undefined,
+        source: 'extract',
+        createdAt: now,
+        updatedAt: now,
+        usageCount: 1,
+        metadata: JSON.stringify(metadata || {}),
       } as any);
 
-      return { content: [{ type: 'text', text: JSON.stringify({ saved: true, id, title, message: '已存入个人知识库' }) }] };
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ saved: true, id, title, message: '已存入个人知识库' }),
+        }],
+      };
     }
 
     case TOOLS.LIST: {
@@ -293,11 +224,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         content: [{
           type: 'text',
           text: JSON.stringify({
-            total: items.length, byType,
+            total: items.length,
+            byType,
             items: items.slice(0, 50).map(i => ({
-              id: i.id, title: i.title, type: i.type,
+              id: i.id,
+              title: i.title,
+              type: i.type,
               tags: typeof i.tags === 'string' ? JSON.parse(i.tags) : (i.tags || []),
-              usageCount: i.usageCount, createdAt: i.createdAt,
+              usageCount: i.usageCount,
+              createdAt: i.createdAt,
             })),
           }, null, 2),
         }],
