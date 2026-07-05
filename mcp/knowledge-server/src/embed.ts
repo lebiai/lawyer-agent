@@ -16,6 +16,11 @@ class LocalEmbeddingService implements EmbeddingService {
   constructor(modelName?: string) {
     this.modelName = modelName || process.env.EMBEDDING_MODEL || 'Xenova/bge-base-zh-v1.5';
     env.localModelPath = env.localModelPath || (process.env.HOME + '/.cache/huggingface');
+    // 支持 HuggingFace 镜像（中国用户可通过 HF_ENDPOINT 或 HF_MIRROR 环境变量配置）
+    // 例如: HF_ENDPOINT=https://hf-mirror.com
+    env.remoteHost = process.env.HF_ENDPOINT || process.env.HF_MIRROR || 'https://huggingface.co/';
+    // 确保 remoteHost 以 / 结尾
+    if (!env.remoteHost.endsWith('/')) env.remoteHost += '/';
   }
 
   async init(): Promise<void> {
