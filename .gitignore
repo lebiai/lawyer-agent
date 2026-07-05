@@ -7,3 +7,5 @@ mcp/knowledge-server/node_modules/
 **/data/knowledge.db-wal
 **/data/.last-update-check
 *.log
+*.db-shm
+*.db-wal
