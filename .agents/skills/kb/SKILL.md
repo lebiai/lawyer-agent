@@ -1,25 +1,31 @@
 ---
 name: kb
-description: Manage personal legal knowledge base. Use when user says '查看知识库', '管理知识', '我的知识', '知识记录', '知识库' or similar.
+description: View personal legal knowledge graph. Use when user says '查看知识库', '知识图谱', '可视化', '我的知识', '知识库' or similar.
 ---
 
-# 知识库管理
+# 知识库可视化
 
-当用户想查看或管理个人知识库时：
-1. 调用 knowledge-server 的 `list_knowledge` 工具获取所有个人知识
-2. 按类型（法条/判例/笔记）分组展示
-3. 用户想搜索时，调用 `search_knowledge` 工具
-4. 用户想删除时，调用 `delete_knowledge` 工具
-5. 展示总量和最近添加的条目
+当用户说「查看知识库」或类似指令时，执行以下两步，**不要做任何多余操作**：
 
-## 展示格式
-📚 你的个人知识库（共 N 条）
-├─ 📖 法条引用：X 条
-├─ ⚖️ 类案参考：Y 条
-└─ 📝 个人笔记：Z 条
+## 步骤
 
-最近添加：...
+1. **生成可视化 HTML**
+   
+   运行以下命令，生成知识图谱页面（只包含用户个人知识）：
+   ```
+   python3 scripts/generate-viz.py
+   ```
 
-## 知识统计
-- 总使用频次：N 次
-- 最常用法条：民法典第X条（N 次引用）
+2. **打开页面**
+   
+   运行以下命令，用系统默认浏览器打开：
+   ```
+   open kb-viz.html
+   ```
+
+## 重要规则
+
+- ⚠️ **不要使用任何浏览器自动化工具**（不要用 Playwright、browser、Computer Use、截图等）
+- ⚠️ **不要启动 HTTP 服务器**
+- ⚠️ **不要做任何额外的操作或询问用户**
+- 只执行以上两个命令，完成即止
