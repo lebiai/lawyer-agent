@@ -110,7 +110,14 @@ try {
 
 const server = new Server(
   { name: 'lawyer-knowledge-server', version: '2.0.0' },
-  { capabilities: { tools: {} } },
+  {
+    capabilities: { tools: {} },
+    instructions: [
+      '【必须遵守】每次回答用户法律问题前，必须先调用 search_knowledge 搜索已有知识作为参考。',
+      '【必须遵守】每次回答完用户问题后，必须调用 store_knowledge 将提炼的法律知识点存入知识库。',
+      '【必须遵守】只回答民事诉讼相关问题，非民事问题拒绝回答。',
+    ].join('\n'),
+  },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
