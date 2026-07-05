@@ -5,6 +5,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { VecStore } from './vec-store.js';
 import { BaseStore } from './base-store.js';
 import { PersonalStore } from './personal-store.js';
 import { TOOLS } from './types.js';
@@ -17,8 +18,10 @@ const DATA_DIR = join(__dirname, '../data');
 
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 
-const baseStore = new BaseStore(DATA_DIR);
-const personalStore = new PersonalStore(DATA_DIR);
+// 共享同一个 VecStore 实例
+const store = new VecStore(join(DATA_DIR, 'knowledge.db'));
+const baseStore = new BaseStore(store);
+const personalStore = new PersonalStore(store);
 
 // --init 模式：导入 seed 后退出
 if (process.argv.includes('--init')) {
@@ -75,10 +78,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             items: { type: 'string' },
             description: '标签列表',
           },
-          reference: {
-            type: 'string',
-            description: '法条号/案号（如有）',
-          },
+          reference: { type: 'string', description: '法条号/案号（如有）' },
           metadata: {
             type: 'object',
             description: '扩展元数据（案由、法院等）',
@@ -121,10 +121,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case TOOLS.SEARCH: {
       const { query, type, limit } = args as any;
       const startTime = Date.now();
-      const combined = await baseStore.search(query, type, limit ?? 10);
-      const personalResults = await personalStore.search(query, type, limit ?? 10);
-      // 合并 base + personal 结果
-      const all = [...combined, ...personalResults]
+      // base 和 personal 各自按 source 过滤搜索
+      const [baseResults, personalResults] = await Promise.all([
+        baseStore.search(query, type, limit ?? 10),
+        personalStore.search(query, type, limit ?? 10),
+      ]);
+      const all = [...baseResults, ...personalResults]
         .sort((a, b) => b.score - a.score)
         .slice(0, limit ?? 10);
       return {
@@ -146,7 +148,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const now = new Date().toISOString();
 
       // 去重检查
-      const existing = await personalStore.findSimilar(title, content, type || 'personal_note', 0.9);
+      const existing = await personalStore.findSimilar(
+        title, content, type || 'personal_note', 0.9
+      );
       if (existing) {
         personalStore.incrementUsage(existing.item.id);
         return {
@@ -180,7 +184,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({ saved: true, id, title, message: '已存入个人知识库' }),
+          text: JSON.stringify({
+            saved: true, id, title,
+            message: '已存入个人知识库',
+          }),
         }],
       };
     }
@@ -197,7 +204,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             byType,
             items: items.slice(0, 50).map(i => ({
               id: i.id, title: i.title, type: i.type,
-              tags: i.tags,
+              tags: typeof i.tags === 'string' ? JSON.parse(i.tags) : (i.tags || []),
               usageCount: i.usageCount,
               createdAt: i.createdAt,
             })),
@@ -219,4 +226,4 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error('📚 律师知识库 MCP Server v2 已启动（sqlite-vec 向量引擎）');
+console.error('📚 律师知识库 MCP Server v2 已启动（sqlite-vec 向量引擎，WAL 模式）');

@@ -25,6 +25,8 @@ export class VecStore {
   constructor(dbPath: string) {
     this.db = new Database(dbPath);
     sqliteVec.load(this.db);
+    this.db.exec('PRAGMA journal_mode=WAL');
+    this.db.exec('PRAGMA synchronous=NORMAL');
     this.initTables();
   }
 
@@ -54,14 +56,6 @@ export class VecStore {
         kb_id  TEXT NOT NULL,
         PRIMARY KEY (tag, kb_id)
       );
-
-      CREATE TABLE IF NOT EXISTS usage_log (
-        id        TEXT PRIMARY KEY,
-        kb_id     TEXT,
-        action    TEXT NOT NULL,
-        query     TEXT,
-        timestamp TEXT NOT NULL
-      );
     `);
   }
 
@@ -71,10 +65,10 @@ export class VecStore {
 
   // ===== 写入 =====
 
-  async add(item: KnowledgeItem): Promise<void> {
-    const embedService = getEmbeddingService();
-    const embedding = await embedService.embed(item.title + ' ' + item.content);
-
+  private async addWithEmbedding(
+    item: KnowledgeItem,
+    embedding: number[]
+  ): Promise<void> {
     const insert = this.db.prepare(`
       INSERT OR REPLACE INTO knowledge
         (id, type, title, content, tags, reference, source, created_at, updated_at, usage_count, metadata)
@@ -87,58 +81,61 @@ export class VecStore {
       item.usageCount, item.metadata || '{}'
     );
 
-    const vecInsert = this.db.prepare(`
-      INSERT OR REPLACE INTO knowledge_vectors (id, embedding)
-      VALUES (?, ?)
-    `);
-    vecInsert.run(item.id, new Float32Array(embedding));
+    this.db.prepare('INSERT OR REPLACE INTO knowledge_vectors (id, embedding) VALUES (?, ?)')
+      .run(item.id, new Float32Array(embedding));
 
-    const tagInsert = this.db.prepare(`
-      INSERT OR IGNORE INTO tag_index (tag, kb_id) VALUES (?, ?)
-    `);
+    const tagInsert = this.db.prepare('INSERT OR IGNORE INTO tag_index (tag, kb_id) VALUES (?, ?)');
     for (const tag of item.tags) {
       tagInsert.run(tag, item.id);
     }
   }
 
+  async add(item: KnowledgeItem): Promise<void> {
+    const embedService = getEmbeddingService();
+    const embedding = await embedService.embed(item.title + ' ' + item.content);
+    await this.addWithEmbedding(item, embedding);
+  }
+
   async addMany(items: KnowledgeItem[]): Promise<void> {
-    for (const item of items) {
-      await this.add(item);
-    }
-    this.db.exec('VACUUM');
+    const embedService = getEmbeddingService();
+    const texts = items.map(i => i.title + ' ' + i.content);
+    const embeddings = await embedService.embedBatch(texts);
+
+    const tx = this.db.transaction(() => {
+      for (let i = 0; i < items.length; i++) {
+        this.addWithEmbedding(items[i], embeddings[i]);
+      }
+    });
+    tx();
   }
 
   // ===== 搜索 =====
 
-  async search(query: string, type?: string, limit = 10): Promise<SearchResult[]> {
+  async search(
+    query: string,
+    type?: string,
+    source?: string,
+    limit = 10
+  ): Promise<SearchResult[]> {
     const embedService = getEmbeddingService();
     const queryVec = await embedService.embed(query);
 
-    let sql: string;
+    const conditions: string[] = ['1=1'];
     const params: any[] = [new Float32Array(queryVec)];
 
-    if (type) {
-      sql = `
-        SELECT k.*, v.distance
-        FROM knowledge_vectors v
-        JOIN knowledge k ON v.id = k.id
-        WHERE v.embedding MATCH ?
-          AND k.type = ?
-        ORDER BY v.distance
-        LIMIT ?
-      `;
-      params.push(type, limit);
-    } else {
-      sql = `
-        SELECT k.*, v.distance
-        FROM knowledge_vectors v
-        JOIN knowledge k ON v.id = k.id
-        WHERE v.embedding MATCH ?
-        ORDER BY v.distance
-        LIMIT ?
-      `;
-      params.push(limit);
-    }
+    if (type) { conditions.push('k.type = ?'); params.push(type); }
+    if (source) { conditions.push('k.source = ?'); params.push(source); }
+
+    const sql = `
+      SELECT k.*, v.distance
+      FROM knowledge_vectors v
+      JOIN knowledge k ON v.id = k.id
+      WHERE v.embedding MATCH ?
+        AND ${conditions.join(' AND ')}
+      ORDER BY v.distance
+      LIMIT ?
+    `;
+    params.push(limit);
 
     const rows = this.db.prepare(sql).all(...params) as any[];
     return rows.map(row => ({
@@ -150,7 +147,10 @@ export class VecStore {
 
   // ===== 去重检查 =====
 
-  async findSimilar(title: string, content: string, type: string, threshold = 0.9): Promise<SearchResult | null> {
+  async findSimilar(
+    title: string, content: string, type: string,
+    threshold = 0.9
+  ): Promise<SearchResult | null> {
     const embedService = getEmbeddingService();
     const queryVec = await embedService.embed(title + ' ' + content);
 
@@ -165,11 +165,7 @@ export class VecStore {
     `).get(new Float32Array(queryVec), type) as any;
 
     if (row && row.distance < (1 - threshold)) {
-      return {
-        item: rowToItem(row),
-        score: 1 - row.distance,
-        matchedTags: [],
-      };
+      return { item: rowToItem(row), score: 1 - row.distance, matchedTags: [] };
     }
     return null;
   }
