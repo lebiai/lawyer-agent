@@ -24,11 +24,38 @@
 </div>
 </div>
 <script>
-var NODES = [];
+var NODES = [
+ {
+  "id": "aebb4a34-2710-4c6f-88b1-f28714426716",
+  "label": "离婚后财产纠纷案分析—（2025）渝01民终9423号",
+  "type": "case_analysis",
+  "color": "#8e44ad",
+  "ref": "（2025）渝01民终9423号",
+  "src": "extract",
+  "usage": 0,
+  "dbLabel": "个人",
+  "content": "用户问题：分析陈某夏某离婚后财产纠纷二审民事判决书\n法律分析：\n案件深度分析报告见完整输出（10维度）。核心要点：\n1. 双方2024年8月28日离婚并签《离婚协议书》，约定全部财产归陈某丽所有\n2. 夏某明主张\"假离婚真贷款\"，认为协议无效\n3. 法院认定协议有效，理由是签名捺印系真实意思表示，夏某明证据不足\n4. 二审维持原判，驳回全部上诉请求\n5. 核心法条：《最高人民法院关于适用〈中华人民共和国民法典〉婚姻家庭编的解释（一）》第六十九条第二款\n6. 启示：假离婚案件中证明\"双方通谋虚伪意思表示\"的举证责任极重，单方事后反悔无法推翻已签协议",
+  "sourceIcon": "🤖",
+  "sourceLabel": "AI 分析"
+ },
+ {
+  "id": "732ab74f-b27e-4180-8202-44c71765516b",
+  "label": "离婚纠纷案分析—（2026）晋0428民初731号",
+  "type": "case_analysis",
+  "color": "#8e44ad",
+  "ref": "（2026）晋0428民初731号",
+  "src": "extract",
+  "usage": 0,
+  "dbLabel": "个人",
+  "content": "用户问题：分析程某甲郭某离婚纠纷一审民事判决书\n法律分析：\n案件深度分析报告见完整输出（10维度）。核心要点：\n1. 原告程某甲诉请离婚，被告郭某经传唤未到庭，缺席审理\n2. 法院以双方结婚十五载、育有二子、不达法定离婚条件为由，判决不准离婚\n3. 核心法条：《中华人民共和国民法典》第一千零七十九条（感情破裂标准）\n4. 原告主张被告不尽家庭责任、违反忠实义务，但未提交充分证据\n5. 启示：缺席判决不等同支持原告诉请；感情破裂需充分证据链\n6. 一审不准离婚后6个月可再次起诉",
+  "sourceIcon": "🤖",
+  "sourceLabel": "AI 分析"
+ }
+];
 var EDGES = [];
 var COLORS = {"law":"#3498db","case":"#e67e22","term":"#27ae60","template":"#9b59b6","case_analysis":"#8e44ad","personal_note":"#e74c3c"};
 var LABELS = {"law":"法条","case":"判例","term":"术语","template":"模板","case_analysis":"案件分析","personal_note":"个人笔记"};
-var STATS = {"total":0,"law":0,"case":0,"term":0,"template":0,"case_analysis":0,"personal_note":0};
+var STATS = {"total":2,"law":0,"case":0,"term":0,"template":0,"case_analysis":2,"personal_note":0};
 var ICONS = {"law":"📖","case":"⚖️","term":"📝","template":"📋","case_analysis":"🔍","personal_note":"📓"};
 
 var nodeMap = {};
@@ -46,9 +73,9 @@ var activeFilters = {};
 Object.keys(LABELS).forEach(function(k) { activeFilters[k] = true; });
 
 var ft = document.getElementById('filters');
-var filterHtml = '<span class="on all" onclick="toggleFilter('all')">全部</span>';
+var filterHtml = '<span class="on all" onclick="toggleFilter(\'all\')">全部</span>';
 Object.keys(LABELS).forEach(function(k) {
-  filterHtml += '<span class="on ' + k + '" onclick="toggleFilter('' + k + '')">' + (ICONS[k]||'') + ' ' + LABELS[k] + '</span>';
+  filterHtml += '<span class="on ' + k + '" onclick="toggleFilter(\'' + k + '\')">' + (ICONS[k]||'') + ' ' + LABELS[k] + '</span>';
 });
 ft.innerHTML = filterHtml;
 
@@ -84,7 +111,7 @@ function updateList() {
   });
   document.getElementById('nc').textContent = '(' + filtered.length + ')';
   document.getElementById('nl').innerHTML = filtered.map(function(n) {
-    return '<div class="ni" onclick="focusNode('' + n.id + '')"><span class="dot" style="background:' + n.color + '"></span><span class="nm">' + n.label + '</span><span class="nt">' + (LABELS[n.type]||n.type) + '</span></div>';
+    return '<div class="ni" onclick="focusNode(\'' + n.id + '\')"><span class="dot" style="background:' + n.color + '"></span><span class="nm">' + n.label + '</span><span class="nt">' + (LABELS[n.type]||n.type) + '</span></div>';
   }).join('');
 }
 

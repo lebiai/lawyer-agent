@@ -164,9 +164,9 @@ var activeFilters = {};
 Object.keys(LABELS).forEach(function(k) { activeFilters[k] = true; });
 
 var ft = document.getElementById('filters');
-var filterHtml = '<span class="on all" onclick="toggleFilter(\'all\')">全部</span>';
+var filterHtml = '<span class="on all" onclick="toggleFilter(\\'all\\')">全部</span>';
 Object.keys(LABELS).forEach(function(k) {
-  filterHtml += '<span class="on ' + k + '" onclick="toggleFilter(\'' + k + '\')">' + (ICONS[k]||'') + ' ' + LABELS[k] + '</span>';
+  filterHtml += '<span class="on ' + k + '" onclick="toggleFilter(\\'' + k + '\\')">' + (ICONS[k]||'') + ' ' + LABELS[k] + '</span>';
 });
 ft.innerHTML = filterHtml;
 
@@ -202,7 +202,7 @@ function updateList() {
   });
   document.getElementById('nc').textContent = '(' + filtered.length + ')';
   document.getElementById('nl').innerHTML = filtered.map(function(n) {
-    return '<div class="ni" onclick="focusNode(\'' + n.id + '\')"><span class="dot" style="background:' + n.color + '"></span><span class="nm">' + n.label + '</span><span class="nt">' + (LABELS[n.type]||n.type) + '</span></div>';
+    return '<div class="ni" onclick="focusNode(\\'' + n.id + '\\')"><span class="dot" style="background:' + n.color + '"></span><span class="nm">' + n.label + '</span><span class="nt">' + (LABELS[n.type]||n.type) + '</span></div>';
   }).join('');
 }
 
