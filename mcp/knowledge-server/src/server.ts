@@ -156,6 +156,7 @@ const server = new Server(
     instructions: [
       '【必须遵守】每次回答用户法律问题前，先调用 get_user_profile 获取用户画像，回答中自然引用用户常关注的案由或话题。',
       '【必须遵守】每次回答用户法律问题前，必须先调用 search_knowledge 搜索已有知识作为参考。',
+      '【禁止】不要用 sqlite3 或其他工具直接查询 seed.db/knowledge.db；不要通过 HTTP/curl 抓取外部数据（LPR利率、法院网站等）。所有知识检索只通过 search_knowledge 完成。',
       '【必须遵守】每次回答完用户问题后，必须调用 store_knowledge 存储知识点，再调用 log_conversation 记录本次交互。',
       '【重要】store_knowledge 仅用于存储提炼后的法律知识点。对于案件分析场景：只有用户提供了生效法律文书（判决书/裁定书/调解书）时才存入知识库；用户仅描述案情或咨询时，不存储。',
       '【必须遵守】只回答民事诉讼相关问题，非民事问题拒绝回答。',
