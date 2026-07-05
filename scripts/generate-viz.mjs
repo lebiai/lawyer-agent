@@ -259,45 +259,50 @@ function cD() { document.getElementById('dp').classList.remove('sh'); }
 
 var tp = document.getElementById('tp');
 
+// 数据初始化（不依赖任何外部库）
+updateList();
+
+var leg = document.getElementById('legend');
+leg.innerHTML = Object.keys(LABELS).map(function(k) {
+  return '<div><span class="ld" style="background:' + COLORS[k] + '"></span><span>' + (ICONS[k]||'') + ' ' + LABELS[k] + '</span></div>';
+}).join('');
+
+// Cytoscape 图谱渲染（CDN 加载失败不影响数据展示）
 window.addEventListener('load', function() {
-  var cy_elem = document.getElementById('cy');
-  var cy = cytoscape({
-    container: cy_elem,
-    elements: [
-      ...NODES.map(function(n) { return { data: { id: n.id, label: n.label } }; }),
-      ...EDGES.map(function(e) { return { data: { source: e.src, target: e.tgt, label: e.label } }; })
-    ],
-    style: [
-      { selector: 'node', style: { 'background-color': function(ele) { return nodeMap[ele.id()] ? nodeMap[ele.id()].color : '#999'; }, label: 'data(label)', 'font-size': '12px', 'text-valign': 'center', 'text-halign': 'center', width: 'label', height: 'label', padding: '10px', 'border-width': 0, 'text-wrap': 'wrap', 'max-width': '120px' } },
-      { selector: 'edge', style: { width: 1, 'line-color': '#ccc', 'target-arrow-color': '#ccc', 'curve-style': 'bezier', label: 'data(label)', 'font-size': '10px', 'text-background-opacity': 1, 'text-background-color': '#fff', 'text-background-padding': '2px', 'line-style': function(ele) { return ele.data().style === 'dashed' ? 'dashed' : 'solid'; } } },
-      { selector: ':selected', style: { 'border-color': '#3498db', 'border-width': 2 } }
-    ],
-    layout: { name: 'cose', animate: false, nodeRepulsion: 8000, idealEdgeLength: 120, gravity: 0.25 },
-    userZoomingEnabled: true,
-    userPanningEnabled: true,
-  });
+  if (typeof cytoscape === 'undefined') return;
+  try {
+    var cy_elem = document.getElementById('cy');
+    var cy = cytoscape({
+      container: cy_elem,
+      elements: [
+        ...NODES.map(function(n) { return { data: { id: n.id, label: n.label } }; }),
+        ...EDGES.map(function(e) { return { data: { source: e.src, target: e.tgt, label: e.label } }; })
+      ],
+      style: [
+        { selector: 'node', style: { 'background-color': function(ele) { return nodeMap[ele.id()] ? nodeMap[ele.id()].color : '#999'; }, label: 'data(label)', 'font-size': '12px', 'text-valign': 'center', 'text-halign': 'center', width: 'label', height: 'label', padding: '10px', 'border-width': 0, 'text-wrap': 'wrap', 'max-width': '120px' } },
+        { selector: 'edge', style: { width: 1, 'line-color': '#ccc', 'target-arrow-color': '#ccc', 'curve-style': 'bezier', label: 'data(label)', 'font-size': '10px', 'text-background-opacity': 1, 'text-background-color': '#fff', 'text-background-padding': '2px', 'line-style': function(ele) { return ele.data().style === 'dashed' ? 'dashed' : 'solid'; } } },
+        { selector: ':selected', style: { 'border-color': '#3498db', 'border-width': 2 } }
+      ],
+      layout: { name: 'cose', animate: false, nodeRepulsion: 8000, idealEdgeLength: 120, gravity: 0.25 },
+      userZoomingEnabled: true,
+      userPanningEnabled: true,
+    });
 
-  cy.on('tap', 'node', function(evt) {
-    showDetail(evt.target.id());
-    cy.fit(evt.target, 50);
-    cy.center(evt.target);
-  });
+    cy.on('tap', 'node', function(evt) {
+      showDetail(evt.target.id());
+      cy.fit(evt.target, 50);
+      cy.center(evt.target);
+    });
 
-  cy.on('mouseover', 'node', function(evt) {
-    var n = nodeMap[evt.target.id()];
-    if (n) {
-      tp.textContent = n.label;
-      tp.style.display = 'block';
-    }
-  });
-  cy.on('mouseout', 'node', function() { tp.style.display = 'none'; });
-
-  var leg = document.getElementById('legend');
-  leg.innerHTML = Object.keys(LABELS).map(function(k) {
-    return '<div><span class="ld" style="background:' + COLORS[k] + '"></span><span>' + (ICONS[k]||'') + ' ' + LABELS[k] + '</span></div>';
-  }).join('');
-
-  updateList();
+    cy.on('mouseover', 'node', function(evt) {
+      var n = nodeMap[evt.target.id()];
+      if (n) {
+        tp.textContent = n.label;
+        tp.style.display = 'block';
+      }
+    });
+    cy.on('mouseout', 'node', function() { tp.style.display = 'none'; });
+  } catch(e) {}
 });
 `;
 

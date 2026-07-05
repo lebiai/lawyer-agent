@@ -10,12 +10,14 @@ export class PersonalStore {
 
   get vecStore() { return this.store; }
 
-  async add(item: KnowledgeItem) { await this.store.add(item); }
+  async add(item: KnowledgeItem, precomputedEmbedding?: number[]) {
+    await this.store.add(item, precomputedEmbedding);
+  }
   async search(query: string, type?: string, limit = 10) {
     return this.store.search({ query, type, source: 'extract', limit });
   }
-  async findSimilar(title: string, content: string, type: string, threshold = 0.9) {
-    return this.store.findSimilar({ title, content, type, threshold });
+  async findSimilar(title: string, content: string, type: string, threshold = 0.9, precomputedEmbedding?: number[]) {
+    return this.store.findSimilar({ title, content, type, threshold }, precomputedEmbedding);
   }
   getAll(type?: string) { return this.store.getAll(type); }
   delete(id: string) { return this.store.delete(id); }

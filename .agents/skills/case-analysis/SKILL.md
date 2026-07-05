@@ -21,8 +21,14 @@ Step 3: 调用 search_knowledge 搜索相似案由的已有知识
 Step 4: 按 workflow/01~10 顺序逐维度分析判决书
 Step 5: 按 output/template.md 输出完整报告
 Step 6: 逐条核对原文（rules/quality-control.md）
-Step 7: 归档判断：仅生效法律文书才 store_knowledge(type: case_analysis)
-Step 8: 无论是否归档，都 log_conversation 记录本次交互
+=== 以下两步必须执行，不可遗漏 ===
+Step 7: 归档判断：
+  - ✅ 用户提供了**生效法律文书**（判决书/裁定书/调解书）
+    → 必须调用 store_knowledge(type: case_analysis)
+    → title 格式：「[案由]案分析—[案号]」
+    → content: 完整分析报告
+  - ❌ 仅案情描述/咨询 → 不存储
+Step 8: ✅ 无论是否归档，都调用 log_conversation 记录本次交互
 ```
 
 ## 分析维度（10 个模块）
@@ -47,10 +53,6 @@ Step 8: 无论是否归档，都 log_conversation 记录本次交互
 | 证据分类/清洗/采信评价 | rules/evidence-rules.md |
 | 法条引用格式 | rules/law-citation.md |
 | 质量约束/反例/自查 | rules/quality-control.md |
-
-## 归档规则
-- 用户提供了**生效法律文书**（判决书/裁定书/调解书）→ `store_knowledge(type: case_analysis)`
-- 仅描述案情或咨询 → 不存入，`log_conversation(stored: false)`
 
 ## 个性化
 - 分析前调用 `get_user_profile` 了解律师关注领域

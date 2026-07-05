@@ -292,9 +292,14 @@ export class VecStore {
     for (const tag of item.tags) tagInsert.run(tag, item.id);
   }
 
-  async add(item: KnowledgeItem): Promise<void> {
-    const svc = getEmbeddingService();
-    const embedding = await svc.embed(item.title + ' ' + item.content);
+  async add(item: KnowledgeItem, precomputedEmbedding?: number[]): Promise<void> {
+    let embedding: number[];
+    if (precomputedEmbedding) {
+      embedding = precomputedEmbedding;
+    } else {
+      const svc = getEmbeddingService();
+      embedding = await svc.embed(item.title + ' ' + item.content);
+    }
     this.addWithEmbedding(item, embedding);
     this.queryCache.invalidate();
     this.resizeCache();
@@ -356,10 +361,15 @@ export class VecStore {
 
   // ===== 去重检查 =====
 
-  async findSimilar(options: FindSimilarOptions): Promise<SearchResult | null> {
+  async findSimilar(options: FindSimilarOptions, precomputedEmbedding?: number[]): Promise<SearchResult | null> {
     const { title, content, type, threshold = 0.9 } = options;
-    const svc = getEmbeddingService();
-    const queryVec = await svc.embed(title + ' ' + content);
+    let queryVec: number[];
+    if (precomputedEmbedding) {
+      queryVec = precomputedEmbedding;
+    } else {
+      const svc = getEmbeddingService();
+      queryVec = await svc.embed(title + ' ' + content);
+    }
 
     const row = this.db.prepare(`
       SELECT k.*, v.distance
