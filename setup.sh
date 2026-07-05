@@ -13,6 +13,20 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # 1. 安装依赖并编译 MCP Server
 cd "$PROJECT_DIR/mcp/knowledge-server"
 npm install --silent 2>/dev/null
+
+# 允许 better-sqlite3 运行安装脚本（npm >= 10 安全策略要求）
+npm approve-scripts better-sqlite3 2>/dev/null; true
+
+# 重新编译 better-sqlite3 原生模块（解决 macOS 签名/架构兼容问题）
+echo "🛠️  重新编译 better-sqlite3..."
+if npm rebuild better-sqlite3 2>/dev/null; then
+    # macOS 上给原生模块签名，防止 Team ID 不匹配被拦截
+    NATIVE_MODULE="node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+    if [ -f "$NATIVE_MODULE" ] && [ "$(uname)" = "Darwin" ]; then
+        codesign --sign - --force "$NATIVE_MODULE" 2>/dev/null || true
+        echo "✅ better-sqlite3 签名完成"
+    fi
+fi
 npm run build
 
 # 2. 注册 MCP Server 到项目本地配置
