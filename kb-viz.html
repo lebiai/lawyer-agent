@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>律师助手 - 知识图谱</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.9.0/sql-wasm.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f5f6fa; color: #2c3e50; height: 100vh; display: flex; flex-direction: column; }
+
+/* Header */
+.header { background: linear-gradient(135deg, #2c3e50, #3498db); color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+.header h1 { font-size: 20px; font-weight: 600; }
+.header h1 span { opacity: 0.8; font-weight: 400; font-size: 14px; margin-left: 8px; }
+.header-actions { display: flex; gap: 12px; align-items: center; }
+.btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s; }
+.btn-primary { background: #fff; color: #2c3e50; }
+.btn-primary:hover { background: #ecf0f1; }
+.btn-sm { padding: 4px 12px; font-size: 12px; }
+.btn-outline { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.4); }
+.btn-outline:hover { border-color: #fff; }
+
+/* Main Layout */
+.main { display: flex; flex: 1; overflow: hidden; }
+
+/* Sidebar */
+.sidebar { width: 300px; min-width: 300px; background: #fff; border-right: 1px solid #e1e4e8; display: flex; flex-direction: column; overflow-y: auto; }
+.sidebar-section { padding: 16px; border-bottom: 1px solid #f0f0f0; }
+.sidebar-section:last-child { border-bottom: none; flex: 1; }
+.sidebar-section h3 { font-size: 13px; color: #7f8c8d; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* Stats */
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stat-card { background: #f8f9fa; border-radius: 8px; padding: 12px; text-align: center; }
+.stat-card .num { font-size: 24px; font-weight: 700; }
+.stat-card .label { font-size: 11px; color: #7f8c8d; margin-top: 2px; }
+.stat-card.law .num { color: #3498db; }
+.stat-card.case .num { color: #e67e22; }
+.stat-card.term .num { color: #27ae60; }
+.stat-card.note .num { color: #9b59b6; }
+.stat-card.total .num { color: #2c3e50; }
+
+/* Search */
+.search-box { width: 100%; padding: 10px 14px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; outline: none; transition: border 0.2s; }
+.search-box:focus { border-color: #3498db; }
+
+/* Filter tags */
+.filter-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.filter-tag { padding: 4px 10px; border-radius: 12px; border: 1px solid #ddd; font-size: 12px; cursor: pointer; transition: all 0.2s; user-select: none; background: #fff; }
+.filter-tag:hover { border-color: #3498db; }
+.filter-tag.active { background: #3498db; color: #fff; border-color: #3498db; }
+.filter-tag.active.law-tag { background: #3498db; border-color: #3498db; }
+.filter-tag.active.case-tag { background: #e67e22; border-color: #e67e22; }
+.filter-tag.active.term-tag { background: #27ae60; border-color: #27ae60; }
+.filter-tag.active.template-tag { background: #9b59b6; border-color: #9b59b6; }
+.filter-tag.active.personal_note-tag { background: #e74c3c; border-color: #e74c3c; }
+
+/* Node list */
+.node-list { max-height: 300px; overflow-y: auto; }
+.node-item { padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 12px; display: flex; align-items: center; gap: 6px; transition: background 0.15s; }
+.node-item:hover { background: #f0f4ff; }
+.node-item .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.node-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Graph Area */
+.graph-area { flex: 1; position: relative; background: #fff; }
+#cy { width: 100%; height: 100%; }
+
+/* Detail Panel */
+.detail-panel { position: absolute; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid #e1e4e8; padding: 16px 20px; transform: translateY(100%); transition: transform 0.3s; max-height: 200px; overflow-y: auto; z-index: 10; }
+.detail-panel.visible { transform: translateY(0); }
+.detail-panel .close-detail { float: right; background: none; border: none; font-size: 18px; cursor: pointer; color: #7f8c8d; padding: 0 4px; }
+.detail-panel .detail-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.detail-panel .detail-meta { font-size: 12px; color: #7f8c8d; margin-bottom: 8px; display: flex; gap: 12px; }
+.detail-panel .detail-type { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; color: #fff; }
+.detail-panel .detail-content { font-size: 13px; line-height: 1.6; color: #555; }
+.detail-panel .detail-tags { margin-top: 6px; display: flex; gap: 4px; flex-wrap: wrap; }
+.detail-panel .detail-tag { padding: 2px 8px; border-radius: 8px; background: #f0f0f0; font-size: 11px; color: #666; }
+
+/* Toast */
+.toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #2c3e50; color: #fff; padding: 10px 24px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100; }
+.toast.show { opacity: 1; }
+
+/* Legend */
+.legend { position: absolute; top: 12px; right: 12px; background: rgba(255,255,255,0.95); border: 1px solid #e1e4e8; border-radius: 8px; padding: 12px; z-index: 5; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.legend-item { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+/* Empty state */
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #bdc3c7; }
+.empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+.empty-state .text { font-size: 16px; }
+.empty-state .sub { font-size: 13px; margin-top: 4px; }
+
+/* Loading */
+.loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255,255,255,0.9); padding: 20px 32px; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); z-index: 20; text-align: center; display: none; }
+.loading.show { display: block; }
+.spinner { width: 32px; height: 32px; border: 3px solid #eee; border-top-color: #3498db; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 8px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Tooltip */
+.cy-tooltip { position: absolute; background: rgba(44,62,80,0.92); color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 12px; pointer-events: none; z-index: 30; white-space: nowrap; display: none; }
+
+/* Status badge */
+.status-badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+.status-badge.loaded { background: #d4edda; color: #155724; }
+.status-badge.waiting { background: #fff3cd; color: #856404; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📚 律师助手 <span>知识图谱</span></h1>
+  <div class="header-actions">
+    <span id="statusBadge" class="status-badge waiting">⏳ 未加载</span>
+    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">📂 选择数据库</button>
+    <button class="btn btn-outline" onclick="resetView()">🔄 重置视图</button>
+  </div>
+  <input type="file" id="fileInput" accept=".db" style="display:none" onchange="loadDatabase(event)">
+</div>
+
+<div class="main">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <h3>📊 知识统计</h3>
+      <div class="stat-grid" id="statGrid">
+        <div class="stat-card total"><div class="num">0</div><div class="label">总条目</div></div>
+        <div class="stat-card law"><div class="num">0</div><div class="label">法条</div></div>
+        <div class="stat-card case"><div class="num">0</div><div class="label">判例</div></div>
+        <div class="stat-card term"><div class="num">0</div><div class="label">术语</div></div>
+        <div class="stat-card note"><div class="num">0</div><div class="label">模板</div></div>
+        <div class="stat-card note"><div class="num">0</div><div class="label">个人笔记</div></div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>🔍 搜索</h3>
+      <input type="text" class="search-box" id="searchBox" placeholder="输入关键词搜索..." oninput="filterGraph()">
+    </div>
+
+    <div class="sidebar-section">
+      <h3>🏷️ 筛选类型</h3>
+      <div class="filter-tags" id="filterTags">
+        <span class="filter-tag active" data-type="all" onclick="toggleFilter(this)">全部</span>
+        <span class="filter-tag active law-tag" data-type="law" onclick="toggleFilter(this)">📖 法条</span>
+        <span class="filter-tag active case-tag" data-type="case" onclick="toggleFilter(this)">⚖️ 判例</span>
+        <span class="filter-tag active term-tag" data-type="term" onclick="toggleFilter(this)">📝 术语</span>
+        <span class="filter-tag active template-tag" data-type="template" onclick="toggleFilter(this)">📋 模板</span>
+        <span class="filter-tag active personal_note-tag" data-type="personal_note" onclick="toggleFilter(this)">📓 笔记</span>
+      </div>
+    </div>
+
+    <div class="sidebar-section" style="flex:1;">
+      <h3>📋 节点列表 <span id="nodeCount" style="font-weight:400;color:#999;font-size:12px;"></span></h3>
+      <div class="node-list" id="nodeList"></div>
+    </div>
+  </div>
+
+  <!-- Graph Area -->
+  <div class="graph-area">
+    <div class="empty-state" id="emptyState">
+      <div class="icon">🗂️</div>
+      <div class="text">点击右上角「选择数据库」加载知识库</div>
+      <div class="sub">支持 knowledge.db 或 seed.db</div>
+    </div>
+    <div id="cy"></div>
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <div>正在加载知识库...</div>
+    </div>
+    <div class="legend" id="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#3498db"></span> 法条</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#e67e22"></span> 判例</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#27ae60"></span> 术语</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#9b59b6"></span> 模板</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#e74c3c"></span> 个人笔记</div>
+    </div>
+    <div class="detail-panel" id="detailPanel">
+      <button class="close-detail" onclick="closeDetail()">✕</button>
+      <div class="detail-title" id="detailTitle"></div>
+      <div class="detail-meta">
+        <span class="detail-type" id="detailType"></span>
+        <span id="detailSource"></span>
+        <span id="detailUsage">使用 0 次</span>
+      </div>
+      <div class="detail-content" id="detailContent"></div>
+      <div class="detail-tags" id="detailTags"></div>
+    </div>
+    <div class="cy-tooltip" id="tooltip"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ===== Config =====
+const TYPE_COLORS = {
+  law: '#3498db',
+  case: '#e67e22',
+  term: '#27ae60',
+  template: '#9b59b6',
+  personal_note: '#e74c3c',
+};
+const TYPE_LABELS = { law: '法条', case: '判例', term: '术语', template: '模板', personal_note: '个人笔记' };
+
+// ===== State =====
+let cy = null;
+let allItems = [];
+let activeFilters = new Set(['all']);
+let SQL = null;
+
+// ===== Init SQL.js =====
+async function initSQL() {
+  if (!SQL) {
+    SQL = await initSqlJs({
+      locateFile: file => `https://sql.js.org/dist/${file}`
+    });
+  }
+  return SQL;
+}
+
+// ===== Toast =====
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// ===== Load Database =====
+async function loadDatabase(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  const loading = document.getElementById('loading');
+  loading.classList.add('show');
+  document.getElementById('emptyState').style.display = 'none';
+
+  try {
+    const sql = await initSQL();
+    const buffer = await file.arrayBuffer();
+    const db = new sql.Database(new Uint8Array(buffer));
+
+    // Check table
+    const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='knowledge'");
+    if (tables.length === 0) {
+      showToast('❌ 数据库中未找到 knowledge 表');
+      loading.classList.remove('show');
+      return;
+    }
+
+    // Load all items
+    const rows = db.exec("SELECT id, type, title, content, tags, reference, source, usage_count, created_at FROM knowledge ORDER BY type, id");
+    allItems = [];
+
+    if (rows.length > 0) {
+      const cols = rows[0].columns;
+      for (const row of rows[0].values) {
+        const item = {};
+        cols.forEach((c, i) => { item[c] = row[i]; });
+        let tags = [];
+        try { tags = JSON.parse(item.tags || '[]'); } catch { tags = []; }
+        item.tags_arr = tags;
+        item.usage_count = item.usage_count || 0;
+        allItems.push(item);
+      }
+    }
+
+    db.close();
+
+    // Update badge
+    document.getElementById('statusBadge').className = 'status-badge loaded';
+    document.getElementById('statusBadge').textContent = `✅ ${file.name} (${allItems.length} 条)`;
+
+    // Render
+    updateStats();
+    renderGraph();
+    loading.classList.remove('show');
+    showToast(`✅ 已加载 ${allItems.length} 条知识`);
+
+  } catch (e) {
+    console.error(e);
+    loading.classList.remove('show');
+    showToast('❌ 加载失败: ' + e.message);
+  }
+}
+
+// ===== Stats =====
+function updateStats() {
+  const counts = { total: allItems.length };
+  for (const t of Object.keys(TYPE_LABELS)) counts[t] = 0;
+  for (const item of allItems) {
+    if (counts[item.type] !== undefined) counts[item.type]++;
+  }
+  
+  const labels = ['total', 'law', 'case', 'term', 'template', 'personal_note'];
+  const cards = document.querySelectorAll('.stat-card .num');
+  labels.forEach((l, i) => {
+    if (cards[i]) cards[i].textContent = counts[l] || 0;
+  });
+}
+
+// ===== Build Graph =====
+function buildGraphData(filteredItems) {
+  const nodes = [];
+  const edges = [];
+  const nodeIds = new Set();
+  const itemMap = {};
+
+  for (const item of filteredItems) {
+    const id = item.id;
+    nodeIds.add(id);
+    itemMap[id] = item;
+    nodes.push({
+      data: {
+        id: id,
+        label: item.title,
+        type: item.type,
+        color: TYPE_COLORS[item.type] || '#95a5a6',
+        ref: item.reference || '',
+        source: item.source || '',
+        usage: item.usage_count || 0,
+      },
+      classes: item.type,
+    });
+  }
+
+  // Build connections
+  // 1. Same tag → connect
+  const tagMap = {};
+  for (const item of filteredItems) {
+    for (const tag of item.tags_arr) {
+      if (!tagMap[tag]) tagMap[tag] = [];
+      tagMap[tag].push(item.id);
+    }
+  }
+
+  const edgeSet = new Set();
+  for (const [tag, ids] of Object.entries(tagMap)) {
+    if (ids.length < 2) continue;
+    if (['法条引用', '类案', '模板'].includes(tag)) continue; // skip generic tags
+    
+    for (let i = 0; i < ids.length && edges.length < 300; i++) {
+      for (let j = i + 1; j < ids.length && edges.length < 300; j++) {
+        const key = [ids[i], ids[j]].sort().join('|');
+        if (!edgeSet.has(key)) {
+          edgeSet.add(key);
+          edges.push({
+            data: {
+              id: 'e_' + key,
+              source: ids[i],
+              target: ids[j],
+              label: tag,
+              weight: 1,
+            },
+            classes: 'tag-edge',
+          });
+        }
+      }
+    }
+  }
+
+  // 2. Reference → connect
+  for (const item of filteredItems) {
+    if (!item.reference) continue;
+    const ref = item.reference;
+    for (const other of filteredItems) {
+      if (other.id === item.id) continue;
+      if (other.title.includes(ref) || ref.includes(other.title)) {
+        const key = [item.id, other.id].sort().join('|');
+        if (!edgeSet.has(key)) {
+          edgeSet.add(key);
+          edges.push({
+            data: {
+              id: 'e_ref_' + key,
+              source: item.id,
+              target: other.id,
+              label: '引用',
+              weight: 2,
+            },
+            classes: 'ref-edge',
+          });
+        }
+      }
+    }
+  }
+
+  return { nodes, edges };
+}
+
+// ===== Render Graph =====
+function renderGraph() {
+  const container = document.getElementById('cy');
+  const empty = document.getElementById('emptyState');
+  
+  if (allItems.length === 0) {
+    empty.style.display = 'flex';
+    if (cy) { cy.destroy(); cy = null; }
+    return;
+  }
+  empty.style.display = 'none';
+
+  const filtered = getFilteredItems();
+  const { nodes, edges } = buildGraphData(filtered);
+
+  if (nodes.length === 0) {
+    if (cy) { cy.destroy(); cy = null; }
+    updateNodeList([]);
+    return;
+  }
+
+  if (cy) cy.destroy();
+
+  cy = cytoscape({
+    container: container,
+    elements: [...nodes, ...edges],
+    layout: {
+      name: 'cose',
+      animate: true,
+      animationDuration: 600,
+      padding: 40,
+      nodeRepulsion: 8000,
+      idealEdgeLength: 120,
+      gravity: 0.3,
+      numIter: 1000,
+    },
+    style: [
+      {
+        selector: 'node',
+        style: {
+          'background-color': 'data(color)',
+          label: 'data(label)',
+          'font-size': '11px',
+          'text-valign': 'bottom',
+          'text-halign': 'center',
+          'font-family': '-apple-system, PingFang SC, Microsoft YaHei, sans-serif',
+          'text-wrap': 'ellipsis',
+          'text-max-width': '120px',
+          width: 'mapData(usage, 0, 20, 28, 50)',
+          height: 'mapData(usage, 0, 20, 28, 50)',
+          'border-width': 1,
+          'border-color': '#fff',
+          'border-opacity': 0.8,
+          'min-zoomed-font-size': 8,
+        },
+      },
+      {
+        selector: 'edge',
+        style: {
+          width: 1.5,
+          'line-color': '#bdc3c7',
+          'target-arrow-color': '#bdc3c7',
+          'curve-style': 'bezier',
+          opacity: 0.6,
+        },
+      },
+      {
+        selector: 'edge.tag-edge',
+        style: { 'line-style': 'dashed', 'line-color': '#95a5a6', width: 1 },
+      },
+      {
+        selector: 'edge.ref-edge',
+        style: { 'line-style': 'solid', 'line-color': '#e74c3c', width: 2, opacity: 0.7 },
+      },
+      {
+        selector: 'node:selected',
+        style: {
+          'border-width': 3,
+          'border-color': '#2c3e50',
+          'shadow-blur': 10,
+          'shadow-color': '#3498db',
+          'shadow-opacity': 0.5,
+        },
+      },
+    ],
+  });
+
+  // Events
+  cy.on('tap', 'node', function(evt) {
+    const node = evt.target;
+    showDetail(node.id());
+  });
+
+  cy.on('tap', function(evt) {
+    if (evt.target === cy) closeDetail();
+  });
+
+  cy.on('mouseover', 'node', function(evt) {
+    const node = evt.target;
+    const tip = document.getElementById('tooltip');
+    tip.textContent = node.data('label');
+    tip.style.display = 'block';
+    const rect = container.getBoundingClientRect();
+    const pos = node.renderedPosition();
+    tip.style.left = (pos.x + 15) + 'px';
+    tip.style.top = (pos.y - 10) + 'px';
+  });
+
+  cy.on('mouseout', 'node', function() {
+    document.getElementById('tooltip').style.display = 'none';
+  });
+
+  updateNodeList(filtered);
+}
+
+// ===== Filtering =====
+function getFilteredItems() {
+  const search = document.getElementById('searchBox').value.trim().toLowerCase();
+  const showAll = activeFilters.has('all');
+  
+  return allItems.filter(item => {
+    // Type filter
+    if (!showAll && !activeFilters.has(item.type)) return false;
+    // Search
+    if (search) {
+      return item.title.toLowerCase().includes(search) ||
+             item.content.toLowerCase().includes(search) ||
+             item.tags_arr.some(t => t.toLowerCase().includes(search));
+    }
+    return true;
+  });
+}
+
+function filterGraph() {
+  if (cy) renderGraph();
+}
+
+function toggleFilter(el) {
+  const type = el.dataset.type;
+  el.classList.toggle('active');
+
+  if (type === 'all') {
+    // Uncheck all others
+    if (el.classList.contains('active')) {
+      document.querySelectorAll('.filter-tag[data-type]').forEach(t => {
+        if (t.dataset.type !== 'all') t.classList.remove('active');
+      });
+      activeFilters.clear();
+      activeFilters.add('all');
+    } else {
+      activeFilters.delete('all');
+      if (activeFilters.size === 0) activeFilters.add('all');
+    }
+  } else {
+    activeFilters.delete('all');
+    document.querySelector('.filter-tag[data-type="all"]').classList.remove('active');
+    
+    if (el.classList.contains('active')) {
+      activeFilters.add(type);
+    } else {
+      activeFilters.delete(type);
+      if (activeFilters.size === 0) {
+        activeFilters.add('all');
+        document.querySelector('.filter-tag[data-type="all"]').classList.add('active');
+      }
+    }
+  }
+
+  renderGraph();
+}
+
+// ===== Node List =====
+function updateNodeList(items) {
+  const list = document.getElementById('nodeList');
+  const count = document.getElementById('nodeCount');
+  count.textContent = `(显示 ${items.length} 条)`;
+  list.innerHTML = items.map(item => `
+    <div class="node-item" onclick="focusNode('${item.id}')">
+      <span class="dot" style="background:${TYPE_COLORS[item.type] || '#95a5a6'}"></span>
+      <span class="name">${escapeHtml(item.title)}</span>
+      <span style="font-size:10px;color:#999;flex-shrink:0;">${TYPE_LABELS[item.type] || item.type}</span>
+    </div>
+  `).join('');
+}
+
+function focusNode(id) {
+  if (!cy) return;
+  const node = cy.getElementById(id);
+  if (node.length === 0) return;
+  cy.fit(node.neighborhood().add(node), 50);
+  node.trigger('tap');
+}
+
+// ===== Detail Panel =====
+function showDetail(id) {
+  if (!cy) return;
+  const node = cy.getElementById(id);
+  if (node.length === 0) return;
+  const data = node.data();
+  
+  const item = allItems.find(i => i.id === id);
+  if (!item) return;
+
+  document.getElementById('detailTitle').textContent = data.label;
+  const dt = document.getElementById('detailType');
+  dt.textContent = TYPE_LABELS[data.type] || data.type;
+  dt.style.background = TYPE_COLORS[data.type] || '#95a5a6';
+
+  document.getElementById('detailSource').textContent = data.source === 'seed' ? '📚 公共知识库' : '📓 个人知识库';
+  document.getElementById('detailUsage').textContent = `使用 ${data.usage} 次`;
+
+  document.getElementById('detailContent').textContent = item.content || '(无详细内容)';
+  
+  const tagContainer = document.getElementById('detailTags');
+  tagContainer.innerHTML = item.tags_arr.map(t => `<span class="detail-tag">${escapeHtml(t)}</span>`).join('');
+
+  document.getElementById('detailPanel').classList.add('visible');
+}
+
+function closeDetail() {
+  document.getElementById('detailPanel').classList.remove('visible');
+}
+
+// ===== Reset =====
+function resetView() {
+  if (!cy) return;
+  cy.fit(undefined, 40);
+  closeDetail();
+}
+
+// ===== Utility =====
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+// ===== Init =====
+document.addEventListener('DOMContentLoaded', () => {
+  // Show empty state
+  document.getElementById('emptyState').style.display = 'flex';
+  
+  // Drag and drop support
+  const graphArea = document.querySelector('.graph-area');
+  graphArea.addEventListener('dragover', (e) => { e.preventDefault(); });
+  graphArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const files = e.dataTransfer.files;
+    if (files.length > 0 && files[0].name.endsWith('.db')) {
+      const input = document.getElementById('fileInput');
+      const dt = new DataTransfer();
+      dt.items.add(files[0]);
+      input.files = dt.files;
+      loadDatabase({ target: input });
+    }
+  });
+});
+</script>
+</body>
+</html>
