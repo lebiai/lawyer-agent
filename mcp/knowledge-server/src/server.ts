@@ -135,6 +135,13 @@ try {
   const svc = getEmbeddingService();
   await svc.init();
   console.error('[启动] 嵌入模型预热完成');
+  // 检查并执行向量迁移（旧版 seed.db 维度迁移）
+  if (store.needsReindexCount > 0 || baseStore.needsReindexCount > 0) {
+    console.error('[启动] 检测到向量维度变更，重新索引知识库...');
+    const storeCount = await store.reindexVectors();
+    const seedCount = await baseStore.reindexVectors();
+    console.error(`[启动] 重新索引完成: 个人库 ${storeCount} 条, 公共库 ${seedCount} 条`);
+  }
 } catch (e) {
   console.error('[启动] 嵌入模型预热失败: ' + e);
   console.error('[启动] 将降级运行：向量搜索和存储功能不可用');

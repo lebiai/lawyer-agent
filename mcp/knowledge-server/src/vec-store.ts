@@ -124,15 +124,23 @@ export class VecStore {
   }
 
   private getStoredDimension(): number {
-    const existing = this.db.prepare(
+    // v2+ DB: 从 _schema_meta 读取维度
+    const metaExists = this.db.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_meta'"
     ).get();
-    if (!existing) return 0;
-
-    const row = this.db.prepare(
-      "SELECT value FROM _schema_meta WHERE key = 'vector_dimension'"
-    ).get() as any;
-    return row ? parseInt(row.value, 10) : 0;
+    if (metaExists) {
+      const row = this.db.prepare(
+        "SELECT value FROM _schema_meta WHERE key = 'vector_dimension'"
+      ).get();
+      if (row) return parseInt((row as any).value, 10);
+    } else {
+      // 旧版 DB: vec0 表存在但无 _schema_meta → 原硬编码 1024 维
+      const vecExists = this.db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='knowledge_vectors'"
+      ).get();
+      if (vecExists) return 1024;
+    }
+    return 0;
   }
 
   private initTables() {
@@ -142,8 +150,12 @@ export class VecStore {
     // 如果表已存在且维度不匹配，迁移
     if (storedDim > 0 && storedDim !== modelDim) {
       console.error(`[迁移] 向量维度 ${storedDim} → ${modelDim}，重建向量表...`);
+      // 暂存已有知识条目 id，迁移后重新索引
+      const existingIds = (this.db.prepare('SELECT id FROM knowledge').all() || []).map((r: any) => r.id);
       this.db.exec('DROP TABLE IF EXISTS knowledge_vectors');
       this.db.exec("DROP TABLE IF EXISTS _schema_meta");
+      // 标记需要重新索引（server.ts 预热模型后调用 reindexVectors）
+      this._needsReindex = existingIds;
     }
 
     // 如果表存在且维度匹配，只初始化常规表
@@ -222,7 +234,34 @@ export class VecStore {
     }
   }
 
-  close() { this.db.close(); }
+  // 迁移后需要重新索引的条目 id
+  private _needsReindex: string[] | null = null;
+
+  /** 获取需要重新索引的条目数量 */
+  get needsReindexCount(): number {
+    return this._needsReindex ? this._needsReindex.length : 0;
+  }
+
+  /** 迁移后重新生成向量索引（需嵌入模型已预热） */
+  async reindexVectors(): Promise<number> {
+    if (!this._needsReindex || this._needsReindex.length === 0) return 0;
+    const ids = this._needsReindex;
+    this._needsReindex = null;
+
+    const items = [];
+    for (const id of ids) {
+      const row = this.db.prepare('SELECT * FROM knowledge WHERE id = ?').get(id) as any;
+      if (row) items.push(rowToItem(row));
+    }
+
+    if (items.length === 0) return 0;
+    console.error(`[迁移] 重新索引 ${items.length} 条知识...`);
+    await this.addMany(items);
+    console.error(`[迁移] ✅ 重新索引完成`);
+    return items.length;
+  }
+
+    close() { this.db.close(); }
   resizeCache() {
     const total = this.count();
     if (total !== this.cacheItemCount) {
