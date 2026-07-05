@@ -18,14 +18,24 @@ export interface SearchResult {
   matchedTags: string[];
 }
 
-export interface ExtractInput {
-  conversationText: string;
+export interface ConversationLog {
+  id: string;
+  date: string;
+  caseType: string;
+  question: string;
+  topics: string[];
+  laws: string[];
+  stored: boolean;
 }
 
-export interface SearchInput {
-  query: string;
-  type?: KnowledgeItem['type'];
-  limit?: number;
+export interface UserProfile {
+  totalConversations: number;
+  totalKnowledge: number;
+  caseTypeDistribution: Record<string, number>;
+  topLaws: Array<{ law: string; count: number }>;
+  topTopics: Array<{ topic: string; count: number }>;
+  lastWeekCount: number;
+  knowledgeGrowth: number;
 }
 
 export const TOOLS = {
@@ -34,4 +44,6 @@ export const TOOLS = {
   STORE: 'store_knowledge',
   LIST: 'list_knowledge',
   DELETE: 'delete_knowledge',
+  LOG_CONVERSATION: 'log_conversation',
+  GET_PROFILE: 'get_user_profile',
 } as const;

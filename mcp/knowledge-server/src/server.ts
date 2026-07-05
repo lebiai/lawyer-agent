@@ -8,6 +8,7 @@ import {
 import { VecStore } from './vec-store.js';
 import { BaseStore } from './base-store.js';
 import { PersonalStore } from './personal-store.js';
+import { UserProfileStore } from './user-profile.js';
 import { TOOLS } from './types.js';
 import { getEmbeddingService } from './embed.js';
 import { execSync } from 'child_process';
@@ -93,6 +94,7 @@ const store = new VecStore(DB_PATH);
 // BaseStore 直接读 seed.db（只读）
 const baseStore = new BaseStore(SEED_PATH);
 const personalStore = new PersonalStore(store);
+const profileStore = new UserProfileStore(DB_PATH);
 
 // ===== 启动时预热嵌入模型（避免首次查询等待下载） =====
 await autoUpdateSeed();
@@ -113,8 +115,9 @@ const server = new Server(
   {
     capabilities: { tools: {} },
     instructions: [
+      '【必须遵守】每次回答用户法律问题前，先调用 get_user_profile 获取用户画像，回答中自然引用用户常关注的案由或话题。',
       '【必须遵守】每次回答用户法律问题前，必须先调用 search_knowledge 搜索已有知识作为参考。',
-      '【必须遵守】每次回答完用户问题后，必须调用 store_knowledge 将提炼的法律知识点存入知识库。',
+      '【必须遵守】每次回答完用户问题后，必须调用 store_knowledge 存储知识点，再调用 log_conversation 记录本次交互。',
       '【必须遵守】只回答民事诉讼相关问题，非民事问题拒绝回答。',
     ].join('\n'),
   },
@@ -160,6 +163,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: TOOLS.DELETE,
       description: '删除个人知识库中的条目',
       inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    },
+    {
+      name: TOOLS.LOG_CONVERSATION,
+      description: '记录一次用户的法律咨询交互，用于分析用户关注点和执业画像',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          caseType: { type: 'string', description: '案由分类（借贷/合同/离婚/继承/侵权/其他）' },
+          question: { type: 'string', description: '用户问题摘要' },
+          topics: { type: 'array', items: { type: 'string' }, description: '涉及话题标签' },
+          laws: { type: 'array', items: { type: 'string' }, description: '引用的法条' },
+          stored: { type: 'boolean', description: '是否已存入知识库' },
+        },
+        required: ['caseType', 'question'],
+      },
+    },
+    {
+      name: TOOLS.GET_PROFILE,
+      description: '获取用户执业画像：案由分布、高频法条、关注话题等，用于在回答中个性化引用',
+      inputSchema: { type: 'object', properties: {} },
     },
   ],
 }));
@@ -259,6 +282,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case TOOLS.DELETE: {
       const { id } = args as { id: string };
       return { content: [{ type: 'text', text: JSON.stringify({ deleted: personalStore.delete(id) }) }] };
+    }
+
+    case TOOLS.LOG_CONVERSATION: {
+      const { caseType, question, topics, laws, stored } = args as any;
+      const logId = `conv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      await profileStore.log({
+        id: logId,
+        date: new Date().toISOString(),
+        caseType,
+        question,
+        topics: topics || [],
+        laws: laws || [],
+        stored: !!stored,
+      });
+      return { content: [{ type: 'text', text: JSON.stringify({ saved: true, id: logId }) }] };
+    }
+
+    case TOOLS.GET_PROFILE: {
+      const profile = profileStore.getProfile();
+      return { content: [{ type: 'text', text: JSON.stringify(profile, null, 2) }] };
     }
 
     default:
