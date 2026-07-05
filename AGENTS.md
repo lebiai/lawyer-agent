@@ -90,5 +90,5 @@
 ## 安装指引
 当用户说「帮我安装 [URL]」时：
 1. `git clone <url> .`
-2. `bash setup.sh`
+2. `node setup.mjs`
 3. 告知用户在当前 Thread 继续使用，或新建 Thread 也可
