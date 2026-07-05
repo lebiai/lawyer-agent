@@ -5,6 +5,11 @@ export interface ExtractResult {
   summary: string;
 }
 
+/**
+ * 知识提取器（兜底方案）
+ * 主要提取由 AGENTS.md 指令引导 Codex 调用 store_knowledge 完成
+ * 正则提取作为补充，抓取对话中的法条引用和案号
+ */
 export class KnowledgeExtractor {
   async extract(conversationText: string): Promise<ExtractResult> {
     const result: ExtractResult = { items: [], summary: '' };
@@ -36,23 +41,6 @@ export class KnowledgeExtractor {
           tags: ['类案', match.trim()],
           reference: match.trim(),
         });
-      }
-    }
-
-    // 案由提取
-    const caseTypes = [
-      '民间借贷', '买卖合同', '劳动争议', '离婚', '继承',
-      '交通事故', '房屋租赁', '建设工程', '知识产权', '股权纠纷'
-    ];
-    for (const ct of caseTypes) {
-      if (conversationText.includes(ct) && !result.items.some(i => i.title.includes(ct))) {
-        result.items.push({
-          title: ct,
-          content: `涉及${ct}纠纷`,
-          type: 'personal_note',
-          tags: ['案由', ct],
-        });
-        break;
       }
     }
 

@@ -7,7 +7,9 @@ export interface KnowledgeItem {
   reference?: string;
   source?: string;
   createdAt: string;
+  updatedAt: string;
   usageCount: number;
+  metadata: string;
 }
 
 export interface SearchResult {
@@ -29,6 +31,7 @@ export interface SearchInput {
 export const TOOLS = {
   SEARCH: 'search_knowledge',
   EXTRACT: 'extract_knowledge',
+  STORE: 'store_knowledge',
   LIST: 'list_knowledge',
   DELETE: 'delete_knowledge',
 } as const;

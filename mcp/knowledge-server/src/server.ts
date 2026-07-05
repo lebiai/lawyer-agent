@@ -7,8 +7,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { BaseStore } from './base-store.js';
 import { PersonalStore } from './personal-store.js';
-import { KnowledgeExtractor } from './extractor.js';
-import { TOOLS, SearchInput, ExtractInput, KnowledgeItem } from './types.js';
+import { TOOLS } from './types.js';
 import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -20,22 +19,21 @@ if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 
 const baseStore = new BaseStore(DATA_DIR);
 const personalStore = new PersonalStore(DATA_DIR);
-const extractor = new KnowledgeExtractor();
 
 // --init 模式：导入 seed 后退出
 if (process.argv.includes('--init')) {
-  console.log('📚 正在导入基础法律知识...');
-  baseStore.initFromSeed();
+  console.log('📚 正在导入基础法律知识并生成向量嵌入...');
+  await baseStore.initFromSeed();
   console.log(`✅ Base 库: ${baseStore.count()} 条`);
   console.log(`✅ Personal 库: ${personalStore.count()} 条`);
   process.exit(0);
 }
 
-// 正常启动时也初始化
-baseStore.initFromSeed();
+// 正常启动
+await baseStore.initFromSeed();
 
 const server = new Server(
-  { name: 'lawyer-knowledge-server', version: '1.0.0' },
+  { name: 'lawyer-knowledge-server', version: '2.0.0' },
   { capabilities: { tools: {} } }
 );
 
@@ -43,30 +41,50 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: TOOLS.SEARCH,
-      description: '搜索法律知识库，包含基础法条判例和个人积累',
+      description: '语义搜索知识库，自动理解查询含义。搜「借钱不还」也能匹配到民间借贷类内容',
       inputSchema: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: '搜索关键词' },
+          query: { type: 'string', description: '搜索关键词或问题' },
           type: {
             type: 'string',
             enum: ['law', 'case', 'template', 'term', 'personal_note'],
-            description: '筛选类型',
+            description: '筛选类型（可选）',
           },
-          limit: { type: 'number', description: '返回条数上限' },
+          limit: { type: 'number', description: '返回条数上限', default: 10 },
         },
         required: ['query'],
       },
     },
     {
-      name: TOOLS.EXTRACT,
-      description: '从会话文本中提取知识点并存入个人知识库',
+      name: TOOLS.STORE,
+      description: '将结构化知识存入个人知识库，自动生成向量嵌入。用于从对话中保存提取的律师经验',
       inputSchema: {
         type: 'object',
         properties: {
-          conversationText: { type: 'string', description: '要分析的会话文本' },
+          title: { type: 'string', description: '知识标题' },
+          content: { type: 'string', description: '知识内容' },
+          type: {
+            type: 'string',
+            enum: ['law', 'case', 'template', 'term', 'personal_note'],
+            description: '知识类型',
+            default: 'personal_note',
+          },
+          tags: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '标签列表',
+          },
+          reference: {
+            type: 'string',
+            description: '法条号/案号（如有）',
+          },
+          metadata: {
+            type: 'object',
+            description: '扩展元数据（案由、法院等）',
+          },
         },
-        required: ['conversationText'],
+        required: ['title', 'content'],
       },
     },
     {
@@ -101,46 +119,68 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   switch (name) {
     case TOOLS.SEARCH: {
-      const { query, type, limit } = args as unknown as SearchInput;
-      const baseResults = baseStore.search(query, type, limit ?? 5);
-      const personalResults = personalStore.search(query, type, limit ?? 5);
-      const combined = [...baseResults, ...personalResults]
+      const { query, type, limit } = args as any;
+      const startTime = Date.now();
+      const combined = await baseStore.search(query, type, limit ?? 10);
+      const personalResults = await personalStore.search(query, type, limit ?? 10);
+      // 合并 base + personal 结果
+      const all = [...combined, ...personalResults]
         .sort((a, b) => b.score - a.score)
         .slice(0, limit ?? 10);
       return {
         content: [{
           type: 'text',
           text: JSON.stringify({
-            results: combined,
+            results: all,
             totalBase: baseStore.count(),
             totalPersonal: personalStore.count(),
+            timeMs: Date.now() - startTime,
           }, null, 2),
         }],
       };
     }
 
-    case TOOLS.EXTRACT: {
-      const { conversationText } = args as unknown as ExtractInput;
-      const result = await extractor.extract(conversationText);
-      let saved = 0;
-      for (const item of result.items) {
-        const existing = personalStore.search(item.title, item.type, 1);
-        if (existing.length > 0 && existing[0].score > 5) {
-          personalStore.incrementUsage(existing[0].item.id);
-          continue;
-        }
-        personalStore.add({
-          ...item,
-          id: `personal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          createdAt: new Date().toISOString(),
-          usageCount: 1,
-        } as KnowledgeItem);
-        saved++;
+    case TOOLS.STORE: {
+      const { title, content, type, tags, reference, metadata } = args as any;
+      const id = `personal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const now = new Date().toISOString();
+
+      // 去重检查
+      const existing = await personalStore.findSimilar(title, content, type || 'personal_note', 0.9);
+      if (existing) {
+        personalStore.incrementUsage(existing.item.id);
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              saved: false,
+              matched: existing.item.id,
+              title: existing.item.title,
+              usageCount: existing.item.usageCount + 1,
+              message: '已有相似条目，已增加引用计数',
+            }),
+          }],
+        };
       }
+
+      await personalStore.add({
+        id,
+        type: type || 'personal_note',
+        title,
+        content,
+        tags: tags || [],
+        reference: reference || undefined,
+        source: 'extract',
+        createdAt: now,
+        updatedAt: now,
+        usageCount: 1,
+        metadata: JSON.stringify(metadata || {}),
+      } as any);
+
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({ saved, summary: result.summary, total: personalStore.count() }),
+          text: JSON.stringify({ saved: true, id, title, message: '已存入个人知识库' }),
         }],
       };
     }
@@ -148,14 +188,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case TOOLS.LIST: {
       const { type } = (args ?? {}) as { type?: string };
       const items = personalStore.getAll(type as any);
+      const byType = personalStore.vecStore.countByType();
       return {
         content: [{
           type: 'text',
           text: JSON.stringify({
             total: items.length,
-            items: items.map(i => ({
+            byType,
+            items: items.slice(0, 50).map(i => ({
               id: i.id, title: i.title, type: i.type,
-              tags: i.tags, usageCount: i.usageCount, createdAt: i.createdAt,
+              tags: i.tags,
+              usageCount: i.usageCount,
+              createdAt: i.createdAt,
             })),
           }, null, 2),
         }],
@@ -175,4 +219,4 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error('📚 律师知识库 MCP Server 已启动');
+console.error('📚 律师知识库 MCP Server v2 已启动（sqlite-vec 向量引擎）');

@@ -1,5 +1,5 @@
 import { KnowledgeItem } from './types.js';
-import { LocalStore } from './store.js';
+import { VecStore } from './vec-store.js';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -7,14 +7,15 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export class BaseStore {
-  private store: LocalStore;
+  private store: VecStore;
   private _initialized = false;
-  constructor(basePath: string) {
-    this.store = new LocalStore(join(basePath, 'base-index.json'));
+  constructor(dbPath: string) {
+    this.store = new VecStore(join(dbPath, 'knowledge.db'));
   }
   get initialized() { return this._initialized; }
+  get vecStore() { return this.store; }
 
-  initFromSeed() {
+  async initFromSeed() {
     if (this._initialized) return;
     const allItems: KnowledgeItem[] = [];
     const seedDir = join(__dirname, '../seed');
@@ -22,7 +23,13 @@ export class BaseStore {
     for (const file of ['laws.json', 'cases.json', 'terms.json']) {
       const fp = join(seedDir, file);
       if (existsSync(fp)) {
-        allItems.push(...JSON.parse(readFileSync(fp, 'utf-8')) as KnowledgeItem[]);
+        const seedItems = JSON.parse(readFileSync(fp, 'utf-8')) as KnowledgeItem[];
+        // 确保所有 seed 数据都有正确的 source 字段
+        for (const item of seedItems) {
+          item.source = item.source || 'seed';
+          item.updatedAt = item.updatedAt || item.createdAt;
+        }
+        allItems.push(...seedItems);
       }
     }
 
@@ -36,16 +43,24 @@ export class BaseStore {
           title: name.replace(/-/g, ' '),
           content: readFileSync(join(tmplDir, f), 'utf-8'),
           tags: ['模板', name],
+          source: 'seed',
           createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
           usageCount: 0,
+          metadata: '{}',
         });
       }
     }
 
-    if (allItems.length > 0) this.store.addMany(allItems);
+    if (allItems.length > 0) {
+      await this.store.addMany(allItems);
+    }
     this._initialized = true;
   }
 
-  search(query: string, type?: string, limit = 10) { return this.store.search(query, type, limit); }
-  count() { return this.store.count(); }
+  async search(query: string, type?: string, limit = 10) {
+    return this.store.search(query, type, limit);
+  }
+
+  count() { return this.store.count(undefined, 'seed'); }
 }
