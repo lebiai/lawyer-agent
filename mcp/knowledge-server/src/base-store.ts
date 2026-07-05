@@ -59,7 +59,7 @@ export class BaseStore {
   }
 
   async search(query: string, type?: string, limit = 10) {
-    return this.store.search(query, type, 'seed', limit);
+    return this.store.search({ query, type, source: 'seed', limit });
   }
 
   count() { return this.store.count(undefined, 'seed'); }
