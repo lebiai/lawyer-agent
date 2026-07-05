@@ -3,9 +3,9 @@ import json, sqlite3, os, sys, sys
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_DIR = os.path.join(PROJECT_DIR, 'mcp', 'knowledge-server', 'data')
 
-COLORS = {'law':'#3498db','case':'#e67e22','term':'#27ae60','template':'#9b59b6','personal_note':'#e74c3c'}
-LABELS = {'law':'法条','case':'判例','term':'术语','template':'模板','personal_note':'个人笔记'}
-ICONS = {'law':'📖','case':'⚖️','term':'📝','template':'📋','personal_note':'📓'}
+COLORS = {'law':'#3498db','case':'#e67e22','term':'#27ae60','template':'#9b59b6','case_analysis':'#8e44ad','personal_note':'#e74c3c'}
+LABELS = {'law':'法条','case':'判例','term':'术语','template':'模板','case_analysis':'案件分析','personal_note':'个人笔记'}
+ICONS = {'law':'📖','case':'⚖️','term':'📝','template':'📋','case_analysis':'🔍','personal_note':'📓'}
 
 # 来源标识映射
 SOURCE_LABELS = {

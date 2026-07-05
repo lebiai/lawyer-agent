@@ -1,6 +1,6 @@
 export interface KnowledgeItem {
   id: string;
-  type: 'law' | 'case' | 'template' | 'term' | 'personal_note';
+  type: 'law' | 'case' | 'template' | 'term' | 'personal_note' | 'case_analysis';
   title: string;
   content: string;
   tags: string[];
