@@ -11,7 +11,7 @@ fi
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # 1. 安装依赖并编译 MCP Server
-cd "$PROJECT_DIR/mcp/knowledge-server"
+cd "$PROJECT_DIR/mcp/knowledge-server" || exit 1
 npm install --silent 2>/dev/null
 
 # 允许 better-sqlite3 运行安装脚本（npm >= 10 安全策略要求）
@@ -49,10 +49,12 @@ GLOBAL_CONFIG="$HOME/.codex/config.toml"
 if [ -f "$GLOBAL_CONFIG" ]; then
     # 移除误写入 [hooks.state] 下的内容
     if grep -q "lawyer-knowledge-server\|knowledge-server.*dist/server" "$GLOBAL_CONFIG" 2>/dev/null; then
-        # macOS sed 需要备份扩展名
-        sed -i '' '/lawyer-knowledge-server/d' "$GLOBAL_CONFIG" 2>/dev/null || true
-        # 如果 [hooks.state] 段下只剩空字段，删除整个段
-        sed -i '' '/^\[hooks\.state\]/,/^\[/{ /^\[hooks\.state\]/d; /^\[/!d; }' "$GLOBAL_CONFIG" 2>/dev/null || true
+        # macOS/Linux/Windows (Git Bash) 兼容的 sed
+        if [[ "$(uname)" == "Darwin" ]]; then
+            sed -i '' '/lawyer-knowledge-server/d' "$GLOBAL_CONFIG" 2>/dev/null || true
+        else
+            sed -i '/lawyer-knowledge-server/d' "$GLOBAL_CONFIG" 2>/dev/null || true
+        fi
         echo "✅ 已清理全局配置中的旧条目"
     fi
 fi
@@ -60,7 +62,7 @@ fi
 echo ""
 # 预下载嵌入模型（避免首次 MCP 启动时超时）
 echo "☁️  预下载嵌入模型（首次约 100MB）..."
-cd "$PROJECT_DIR/mcp/knowledge-server"
+cd "$PROJECT_DIR/mcp/knowledge-server" || exit 1
 node -e "
 const { pipeline } = require('@xenova/transformers');
 (async () => {
