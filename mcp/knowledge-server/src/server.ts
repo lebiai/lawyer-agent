@@ -42,6 +42,7 @@ const StoreSchema = z.object({
   type: z.string().optional().default('personal_note'),
   tags: z.array(z.string()).optional().default([]),
   reference: z.string().optional(),
+  similarityThreshold: z.number().min(0).max(1).optional().default(0.9),
   metadata: z.any().optional(),
 });
 
@@ -181,6 +182,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           type: { type: 'string', description: '知识类型: law/case/term/case_analysis/personal_note，默认personal_note' },
           tags: { type: 'array', items: { type: 'string' }, description: '标签列表' },
           reference: { type: 'string', description: '法条/案号等引用来源' },
+          similarityThreshold: { type: "number", description: "去重阈值 0-1，默认0.9，值越低越容易去重" },
         },
         required: ['title', 'content'],
       },
@@ -262,11 +264,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case TOOLS.STORE: {
-        const { title, content, type, tags, reference } = StoreSchema.parse(args);
+        const { title, content, type, tags, reference, similarityThreshold } = StoreSchema.parse(args);
         const id = `personal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const now = new Date().toISOString();
 
-        const existing = await personalStore.findSimilar(title, content, type, 0.9);
+        const existing = await personalStore.findSimilar(title, content, type, similarityThreshold);
         if (existing) {
           personalStore.incrementUsage(existing.item.id);
           return {

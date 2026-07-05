@@ -13,11 +13,29 @@ interface CacheEntry {
 
 class QueryCache {
   private cache = new Map<string, CacheEntry>();
-  private maxSize = 100;
+  private maxSize: number;
   private ttlMs = 5 * 60 * 1000;
 
+  constructor(itemCount: number = 50) {
+    this.maxSize = Math.min(Math.max(Math.floor(itemCount * 0.3), 50), 1000);
+  }
+
+  resize(itemCount: number) {
+    const newSize = Math.min(Math.max(Math.floor(itemCount * 0.3), 50), 1000);
+    if (newSize !== this.maxSize) {
+      this.maxSize = newSize;
+      if (this.cache.size > this.maxSize) {
+        const keys = [...this.cache.keys()];
+        const toDelete = this.cache.size - this.maxSize;
+        for (let i = 0; i < toDelete && i < keys.length; i++) {
+          this.cache.delete(keys[i]);
+        }
+      }
+    }
+  }
+
   private key(query: string, type?: string, source?: string): string {
-    return `${query}|${type || ''}|${source || ''}`;
+    return `${query}|${type || ""}|${source || ""}`;
   }
 
   get(query: string, type?: string, source?: string): SearchResult[] | null {
@@ -93,9 +111,11 @@ function padVector(vec: number[], dim?: number): Float32Array {
 
 export class VecStore {
   private db: Database.Database;
-  private queryCache = new QueryCache();
+  private queryCache: QueryCache;
+  cacheItemCount: number = 0;
 
   constructor(dbPath: string) {
+    this.queryCache = new QueryCache(this.cacheItemCount);
     this.db = new Database(dbPath);
     sqliteVec.load(this.db);
     this.db.exec('PRAGMA journal_mode=WAL');
@@ -203,6 +223,13 @@ export class VecStore {
   }
 
   close() { this.db.close(); }
+  resizeCache() {
+    const total = this.count();
+    if (total !== this.cacheItemCount) {
+      this.cacheItemCount = total;
+      this.queryCache.resize(total);
+    }
+  }
 
   // ===== 写入 =====
 
@@ -231,6 +258,7 @@ export class VecStore {
     const embedding = await svc.embed(item.title + ' ' + item.content);
     this.addWithEmbedding(item, embedding);
     this.queryCache.invalidate();
+    this.resizeCache();
   }
 
   async addMany(items: KnowledgeItem[]): Promise<void> {
@@ -245,6 +273,7 @@ export class VecStore {
     });
     tx();
     this.queryCache.invalidate();
+    this.resizeCache();
   }
 
   // ===== 搜索 =====
@@ -323,6 +352,7 @@ export class VecStore {
     this.db.prepare('DELETE FROM knowledge WHERE id = ?').run(id);
     this.db.prepare('DELETE FROM tag_index WHERE kb_id = ?').run(id);
     this.queryCache.invalidate();
+    this.resizeCache();
     return true;
   }
 
