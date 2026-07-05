@@ -190,8 +190,8 @@ export class VecStore {
       JOIN knowledge k ON v.id = k.id
       WHERE v.embedding MATCH ?
         AND ${conditions.join(' AND ')}
+      AND k = ?
       ORDER BY v.distance
-      LIMIT ?
     `;
     params.push(limit);
 
@@ -219,8 +219,8 @@ export class VecStore {
       JOIN knowledge k ON v.id = k.id
       WHERE v.embedding MATCH ?
         AND k.type = ?
+      AND k = 1
       ORDER BY v.distance
-      LIMIT 1
     `).get(padVector(queryVec), type) as any;
 
     if (row && row.distance < (1 - threshold)) {
