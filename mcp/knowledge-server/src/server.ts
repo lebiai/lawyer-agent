@@ -75,33 +75,35 @@ function shouldCheckUpdate(): boolean {
 async function autoUpdateSeed(): Promise<boolean> {
   if (!shouldCheckUpdate()) return false;
 
-  // 记录本次检查时间
   writeFileSync(UPDATE_CHECK_PATH, String(Date.now()));
 
-  // 只检查一次，不重试
   try {
     execSync('git fetch origin main --quiet', { cwd: PROJECT_ROOT, timeout: 10000, stdio: 'pipe' });
   } catch {
-    // 无网络 / 非 git 仓库，跳过
     return false;
   }
 
-  // 检查是否有更新
-  let behind: string;
+  // 只比对 seed.db 这个文件的 git blob hash
+  let remoteSha: string, localSha: string;
   try {
-    behind = execSync('git rev-list --count HEAD..origin/main', {
-      cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 5000, stdio: 'pipe',
-    }).trim();
+    remoteSha = execSync(
+      'git ls-tree origin/main -- mcp/knowledge-server/data/seed.db',
+      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 5000, stdio: 'pipe' }
+    ).trim().split(/s+/)[2] || '';
+    localSha = execSync(
+      'git ls-tree HEAD -- mcp/knowledge-server/data/seed.db',
+      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 5000, stdio: 'pipe' }
+    ).trim().split(/s+/)[2] || '';
   } catch {
     return false;
   }
 
-  if (behind === '0') {
+  if (remoteSha === localSha) {
     console.error('[update] 知识库已是最新');
     return false;
   }
 
-  console.error(`[update] 发现公共知识库更新 (${behind} 个提交)，正在同步...`);
+  console.error('[update] 发现 seed.db 更新，正在同步...');
 
   // 只拉取 seed.db，不碰代码
   try {
@@ -112,13 +114,12 @@ async function autoUpdateSeed(): Promise<boolean> {
       cwd: PROJECT_ROOT, timeout: 5000, stdio: 'pipe',
     });
   } catch (e) {
-    console.error(`[update] 拉取 seed.db 失败: ${e}`);
+    console.error('[update] 拉取 seed.db 失败: ' + e);
     return false;
   }
 
   console.error('[update] seed.db 已更新，合并到知识库...');
 
-  // 合并到 knowledge.db
   if (existsSync(DB_PATH)) {
     const seedStore = new VecStore(SEED_PATH);
     const mainStore = new VecStore(DB_PATH);
@@ -133,12 +134,13 @@ async function autoUpdateSeed(): Promise<boolean> {
     }
     seedStore.close();
     mainStore.close();
-    console.error(`[update] ✅ 新增 ${added} 条知识`);
+    console.error('[update] ✅ 新增 ' + added + ' 条知识');
   }
 
   return true;
 }
 
+// ===== 知识库初始化 =====
 // ===== 知识库初始化 =====
 
 if (!existsSync(DB_PATH)) {
