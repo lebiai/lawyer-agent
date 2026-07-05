@@ -9,6 +9,7 @@ import { VecStore } from './vec-store.js';
 import { BaseStore } from './base-store.js';
 import { PersonalStore } from './personal-store.js';
 import { TOOLS } from './types.js';
+import { getEmbeddingService } from './embed.js';
 import { execSync } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -93,8 +94,17 @@ const store = new VecStore(DB_PATH);
 const baseStore = new BaseStore(SEED_PATH);
 const personalStore = new PersonalStore(store);
 
-// ===== 启动时自动检查更新（在 Server 启动前执行） =====
+// ===== 启动时预热嵌入模型（避免首次查询等待下载） =====
 await autoUpdateSeed();
+console.error('[启动] 预热嵌入模型...');
+try {
+  const svc = getEmbeddingService();
+  await svc.init();
+  console.error('[启动] 嵌入模型预热完成');
+} catch (e) {
+  console.error('[启动] 嵌入模型预热失败: ' + e);
+}
+
 
 // ===== MCP Server =====
 
