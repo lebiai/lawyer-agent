@@ -1,11 +1,19 @@
-import json, sqlite3, os, sys
+import json, sqlite3, os, sys, sys
 
-PROJECT_DIR = '/Users/aodun/Documents/Codex/2026-07-05/bytedance-ui-tars-desktop-https-github/outputs/lawyer-agent'
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_DIR = os.path.join(PROJECT_DIR, 'mcp', 'knowledge-server', 'data')
 
 COLORS = {'law':'#3498db','case':'#e67e22','term':'#27ae60','template':'#9b59b6','personal_note':'#e74c3c'}
 LABELS = {'law':'法条','case':'判例','term':'术语','template':'模板','personal_note':'个人笔记'}
 ICONS = {'law':'📖','case':'⚖️','term':'📝','template':'📋','personal_note':'📓'}
+
+# 来源标识映射
+SOURCE_LABELS = {
+    'seed': {'icon': '📚', 'label': '公共知识库'},
+    'extract': {'icon': '🤖', 'label': 'AI 分析'},
+    'manual': {'icon': '📝', 'label': '个人笔记'},
+}
+SOURCE_DEFAULT = {'icon': '📓', 'label': '个人知识'}
 
 def load_db(path, label):
     if not os.path.exists(path): return []
@@ -19,13 +27,20 @@ def load_db(path, label):
     for r in rows:
         try: tags = json.loads(r[4] or '[]')
         except: tags = []
-        items.append(dict(id=r[0],type=r[1],title=r[2],content=r[3],tags=tags,reference=r[5] or '',source=r[6] or '',usage=r[7] or 0,dbLabel=label))
+        items.append(dict(id=r[0],type=r[1],title=r[2],content=r[3] or '',tags=tags,reference=r[5] or '',source=r[6] or '',usage=r[7] or 0,dbLabel=label))
     return items
 
 def build_graph(items):
     nodes, edges, edge_set = [], [], set()
     for it in items:
-        nodes.append(dict(id=it['id'],label=it['title'],type=it['type'],color=COLORS.get(it['type'],'#95a5a6'),ref=it['reference'],src=it['source'],usage=it['usage'],dbLabel=it['dbLabel']))
+        sl = SOURCE_LABELS.get(it['source'], SOURCE_DEFAULT)
+        nodes.append(dict(
+            id=it['id'], label=it['title'], type=it['type'],
+            color=COLORS.get(it['type'], '#95a5a6'),
+            ref=it['reference'], src=it['source'], usage=it['usage'],
+            dbLabel=it['dbLabel'], content=it['content'],
+            sourceIcon=sl['icon'], sourceLabel=sl['label'],
+        ))
     tag_map = {}
     for it in items:
         for t in it['tags']:
@@ -50,11 +65,12 @@ def build_graph(items):
                     edges.append(dict(src=it['id'],tgt=other['id'],label='引用',style='solid'))
     return nodes, edges
 
-items = []
 use_seed = '--with-seed' in sys.argv
 dbs = [('knowledge.db', '个人')]
 if use_seed:
     dbs.insert(0, ('seed.db', '公共'))
+
+items = []
 for fn, lb in dbs:
     items.extend(load_db(os.path.join(DB_DIR, fn), lb))
 
@@ -118,7 +134,7 @@ function toggleFilter(t) {{
 function getFiltered() {{
   var q = document.getElementById('search').value.toLowerCase();
   return NODES.filter(function(n) {{
-    return activeFilters[n.type] && (!q || n.label.toLowerCase().indexOf(q) >= 0 || (n.ref||'').toLowerCase().indexOf(q) >= 0);
+    return activeFilters[n.type] && (!q || n.label.toLowerCase().indexOf(q) >= 0 || (n.ref||'').toLowerCase().indexOf(q) >= 0 || (n.content||'').toLowerCase().indexOf(q) >= 0);
   }});
 }}
 
@@ -149,6 +165,7 @@ function rG(items, edges) {{
 
   var nodes = items.map(function(n) {{
     return {{ id: n.id, label: n.label, type: n.type, color: n.color, ref: n.ref, usage: n.usage || 0,
+             content: n.content || '', sourceIcon: n.sourceIcon || '📓', sourceLabel: n.sourceLabel || '',
              x: Math.random() * w, y: Math.random() * h, vx: 0, vy: 0 }};
   }});
   var nm = {{}};
@@ -229,10 +246,9 @@ function showDetail(id) {{
   var d = document.getElementById('dty');
   d.textContent = LABELS[n.type] || n.type;
   d.style.background = COLORS[n.type] || '#95a5a6';
-  document.getElementById('dsrc').innerHTML = n.src === 'seed' ? '📚 公共知识库' : '📓 个人知识库';
+  document.getElementById('dsrc').innerHTML = (n.sourceIcon || '📓') + ' ' + (n.sourceLabel || '个人知识');
   document.getElementById('dusage').textContent = '使用 ' + (n.usage||0) + ' 次';
-  document.getElementById('dc').textContent = '(无详细内容)';
-  document.getElementById('dtg').innerHTML = '';
+  document.getElementById('dc').textContent = n.content || '(无详细内容)';
   document.getElementById('dp').classList.add('sh');
 }}
 function cD() {{ document.getElementById('dp').classList.remove('sh'); }}
@@ -253,7 +269,7 @@ document.getElementById('legend').innerHTML = Object.keys(COLORS).map(function(k
 updateView();
 """
 
-CSS = '*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#f5f6fa;color:#2c3e50;display:flex;flex-direction:column;height:100vh;overflow:hidden}.hdr{background:linear-gradient(135deg,#2c3e50,#3498db);color:#fff;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}.hdr h1{font-size:18px;font-weight:600}.hdr .info{font-size:12px;opacity:.8}.mn{display:flex;flex:1;overflow:hidden}.sb{width:280px;min-width:280px;background:#fff;border-right:1px solid #e1e4e8;display:flex;flex-direction:column;overflow-y:auto}.sb section{padding:14px 16px;border-bottom:1px solid #f0f0f0}.sb section:last-child{flex:1;border-bottom:none}.sb h3{font-size:12px;color:#7f8c8d;margin-bottom:8px}.sg{display:grid;grid-template-columns:1fr 1fr;gap:6px}.sc{background:#f8f9fa;border-radius:6px;padding:10px;text-align:center}.sc .n{font-size:22px;font-weight:700}.sc .l{font-size:11px;color:#7f8c8d;margin-top:1px}.sb input{width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none}.sb input:focus{border-color:#3498db}.ft{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px}.ft span{padding:3px 9px;border-radius:10px;border:1px solid #ddd;font-size:11px;cursor:pointer;background:#fff;user-select:none;transition:all .15s}.ft span:hover{border-color:#3498db}.ft .on.law{background:#3498db;color:#fff;border-color:transparent}.ft .on.case{background:#e67e22;color:#fff;border-color:transparent}.ft .on.term{background:#27ae60;color:#fff;border-color:transparent}.ft .on.template{background:#9b59b6;color:#fff;border-color:transparent}.ft .on.personal_note{background:#e74c3c;color:#fff;border-color:transparent}.ft .on.all{background:#2c3e50;color:#fff;border-color:transparent}.nl{flex:1;overflow-y:auto;padding:4px 0}.ni{padding:5px 8px;display:flex;align-items:center;gap:6px;cursor:pointer;border-radius:4px;transition:background .1s;font-size:12px}.ni:hover{background:#f0f4ff}.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}.nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nt{font-size:10px;color:#999;flex-shrink:0}.ga{flex:1;position:relative;overflow:hidden}#cy{width:100%;height:100%;position:relative}.leg{position:absolute;bottom:14px;right:14px;background:rgba(255,255,255,.92);border-radius:8px;padding:8px 12px;font-size:11px;box-shadow:0 1px 6px rgba(0,0,0,.1)}.leg div{display:flex;align-items:center;gap:5px;margin:2px 0}.ld{width:8px;height:8px;border-radius:50%;display:inline-block}.dp{position:absolute;top:0;right:0;width:320px;height:100%;background:#fff;box-shadow:-2px 0 12px rgba(0,0,0,.08);padding:16px;overflow-y:auto;display:none;z-index:10}.dp.sh{display:block}.dx{float:right;background:none;border:none;font-size:16px;cursor:pointer;color:#999}.dx:hover{color:#333}.dt{font-size:14px;font-weight:600;margin-bottom:8px;padding-right:24px}.dm{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.dty{font-size:11px;padding:2px 8px;border-radius:8px;color:#fff}.dc{font-size:12px;color:#555;line-height:1.6;margin-bottom:10px;white-space:pre-wrap}.dtg{display:flex;flex-wrap:wrap;gap:4px}.dtg span{background:#f0f4ff;padding:2px 8px;border-radius:8px;font-size:10px;color:#555}.tp{position:absolute;background:rgba(0,0,0,.78);color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;pointer-events:none;display:none;z-index:20;white-space:nowrap;max-width:400px;overflow:hidden;text-overflow:ellipsis}'
+CSS = '*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#f5f6fa;color:#2c3e50;display:flex;flex-direction:column;height:100vh;overflow:hidden}.hdr{background:linear-gradient(135deg,#2c3e50,#3498db);color:#fff;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}.hdr h1{font-size:18px;font-weight:600}.hdr .info{font-size:12px;opacity:.8}.mn{display:flex;flex:1;overflow:hidden}.sb{width:280px;min-width:280px;background:#fff;border-right:1px solid #e1e4e8;display:flex;flex-direction:column;overflow-y:auto}.sb section{padding:14px 16px;border-bottom:1px solid #f0f0f0}.sb section:last-child{flex:1;border-bottom:none}.sb h3{font-size:12px;color:#7f8c8d;margin-bottom:8px}.sg{display:grid;grid-template-columns:1fr 1fr;gap:6px}.sc{background:#f8f9fa;border-radius:6px;padding:10px;text-align:center}.sc .n{font-size:22px;font-weight:700}.sc .l{font-size:11px;color:#7f8c8d;margin-top:1px}.sb input{width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none}.sb input:focus{border-color:#3498db}.ft{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px}.ft span{padding:3px 9px;border-radius:10px;border:1px solid #ddd;font-size:11px;cursor:pointer;background:#fff;user-select:none;transition:all .15s}.ft span:hover{border-color:#3498db}.ft .on.law{background:#3498db;color:#fff;border-color:transparent}.ft .on.case{background:#e67e22;color:#fff;border-color:transparent}.ft .on.term{background:#27ae60;color:#fff;border-color:transparent}.ft .on.template{background:#9b59b6;color:#fff;border-color:transparent}.ft .on.personal_note{background:#e74c3c;color:#fff;border-color:transparent}.ft .on.all{background:#2c3e50;color:#fff;border-color:transparent}.nl{flex:1;overflow-y:auto;padding:4px 0}.ni{padding:5px 8px;display:flex;align-items:center;gap:6px;cursor:pointer;border-radius:4px;transition:background .1s;font-size:12px}.ni:hover{background:#f0f4ff}.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}.nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nt{font-size:10px;color:#999;flex-shrink:0}.ga{flex:1;position:relative;overflow:hidden}#cy{width:100%;height:100%;position:relative}.leg{position:absolute;bottom:14px;right:14px;background:rgba(255,255,255,.92);border-radius:8px;padding:8px 12px;font-size:11px;box-shadow:0 1px 6px rgba(0,0,0,.1)}.leg div{display:flex;align-items:center;gap:5px;margin:2px 0}.ld{width:8px;height:8px;border-radius:50%;display:inline-block}.dp{position:absolute;top:0;right:0;width:340px;height:100%;background:#fff;box-shadow:-2px 0 12px rgba(0,0,0,.08);padding:16px;overflow-y:auto;display:none;z-index:10}.dp.sh{display:block}.dx{float:right;background:none;border:none;font-size:16px;cursor:pointer;color:#999}.dx:hover{color:#333}.dt{font-size:14px;font-weight:600;margin-bottom:8px;padding-right:24px}.dm{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}.src-badge{padding:2px 8px;border-radius:4px;font-size:11px;background:#f0f4ff;color:#555}.dty{font-size:11px;padding:2px 8px;border-radius:8px;color:#fff}.dc{font-size:12px;color:#333;line-height:1.7;margin-bottom:10px;white-space:pre-wrap;word-break:break-all}.dtg{display:flex;flex-wrap:wrap;gap:4px}.dtg span{background:#f0f4ff;padding:2px 8px;border-radius:8px;font-size:10px;color:#555}.tp{position:absolute;background:rgba(0,0,0,.78);color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;pointer-events:none;display:none;z-index:20;white-space:nowrap;max-width:400px;overflow:hidden;text-overflow:ellipsis}'
 
 HTML = f'''<!DOCTYPE html>
 <html lang="zh-CN">
@@ -275,7 +291,7 @@ HTML = f'''<!DOCTYPE html>
 <div class="ga">
 <div id="cy"></div>
 <div class="leg" id="legend"></div>
-<div class="dp" id="dp"><button class="dx" onclick="cD()">✕</button><div class="dt" id="dt"></div><div class="dm"><span class="dty" id="dty"></span><span id="dsrc"></span><span id="dusage"></span></div><div class="dc" id="dc"></div><div class="dtg" id="dtg"></div></div>
+<div class="dp" id="dp"><button class="dx" onclick="cD()">✕</button><div class="dt" id="dt"></div><div class="dm"><span class="dty" id="dty"></span><span class="src-badge" id="dsrc"></span><span id="dusage" style="font-size:11px;color:#999"></span></div><div class="dc" id="dc"></div></div>
 <div class="tp" id="tp"></div>
 </div>
 </div>
