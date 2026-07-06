@@ -14,7 +14,7 @@ interface CacheEntry {
 class QueryCache {
   private cache = new Map<string, CacheEntry>();
   private maxSize: number;
-  private ttlMs = 5 * 60 * 1000;
+  private ttlMs = 30 * 60 * 1000;  // 30 分钟
 
   constructor(itemCount: number = 50) {
     this.maxSize = Math.min(Math.max(Math.floor(itemCount * 0.3), 50), 1000);
