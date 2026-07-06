@@ -89,6 +89,9 @@
 
 ## 安装指引
 当用户说「帮我安装 [URL]」时：
-1. `git clone <url> .`
+1. 在当前 Project 目录下执行（目录非空也能工作）：
+   ```
+   git init && (git remote add origin <url> 2>/dev/null || git remote set-url origin <url>) && git fetch origin && git checkout -f -B main origin/main
+   ```
 2. `node setup.mjs`
-3. 告知用户在当前 Thread 继续使用，或新建 Thread 也可
+3. 告知用户：关闭当前 Thread → 新建 Thread 即可使用
